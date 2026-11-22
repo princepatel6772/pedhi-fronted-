@@ -1,0 +1,2880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ganj Bazar Pedhi Hisab — Secure Multi-Shop Accounting</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* =========================================================
+       DESIGN TOKENS, PRIVACY BLUR & SIDEBAR PROXIMITY EFFECT
+       ========================================================= */
+    :root {
+      --sidebar-glow-x: 50%;
+      --sidebar-glow-y: -200px;
+    }
+
+    body {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    /* Privacy Mode: Blur all rupee amounts with one click */
+    body.privacy-mode .amt-sensitive {
+      filter: blur(8px);
+      user-select: none;
+      transition: filter 0.2s ease;
+    }
+    .amt-sensitive {
+      transition: filter 0.2s ease;
+    }
+
+    /* Interactive Sidebar Proximity Glow Effect */
+    #sidebar-nav {
+      position: relative;
+      overflow-y: auto;
+    }
+    #sidebar-spotlight {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(
+        180px circle at var(--sidebar-glow-x) var(--sidebar-glow-y),
+        rgba(255, 255, 255, 0.14),
+        transparent 70%
+      );
+      opacity: 0;
+      transition: opacity 0.25s ease;
+      z-index: 0;
+    }
+    #sidebar-nav.has-pointer #sidebar-spotlight {
+      opacity: 1;
+    }
+    .nav-item {
+      position: relative;
+      z-index: 1;
+      transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+                  background-color 0.2s ease,
+                  box-shadow 0.2s ease,
+                  color 0.2s ease;
+    }
+    .nav-item.prox-hover {
+      transform: translateX(7px) scale(1.015);
+      background-color: rgba(255, 255, 255, 0.16);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+      color: #ffffff;
+    }
+    .nav-item.prox-neighbor {
+      transform: translateX(3px);
+      background-color: rgba(255, 255, 255, 0.07);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+    }
+
+    /* Print styling */
+    @media print {
+      body * { visibility: hidden; }
+      #print-area, #print-area * { visibility: visible; }
+      #print-area {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        display: block !important;
+      }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-900 min-h-screen antialiased selection:bg-emerald-200 selection:text-emerald-950">
+
+  <!-- ========================================================= -->
+  <!-- OFFLINE / 404 INTERNET NOT WORKING OVERLAY                -->
+  <!-- ========================================================= -->
+  <div id="offline-overlay" class="hidden fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-6 text-white">
+    <div class="max-w-md w-full bg-slate-900 border border-slate-700 rounded-3xl p-8 text-center shadow-2xl space-y-5">
+      <div class="mx-auto w-20 h-20 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-4xl animate-pulse">
+        📡
+      </div>
+      <div>
+        <div class="text-xs font-extrabold uppercase tracking-widest text-rose-400">Error 404 — Connection Lost</div>
+        <h2 class="text-2xl font-black mt-1">Internet Not Working</h2>
+        <p class="text-sm text-slate-300 mt-2">
+          Aapka internet connection bandh ho gaya hai. Kripya apna Wi-Fi ya Mobile Data check karein taaki MongoDB cloud data safely sync ho sake.
+        </p>
+      </div>
+      <button type="button" onclick="retryInternetConnection()" class="w-full py-3 px-5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-sm transition shadow-lg">
+        🔄 Retry Connection
+      </button>
+    </div>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- SILENT 2-MINUTE BLOCK OVERLAY (NO INSPECT ALERT TEXT)     -->
+  <!-- ========================================================= -->
+  <div id="silent-block-overlay" class="hidden fixed inset-0 z-[95] bg-slate-950 flex items-center justify-center p-6 text-white">
+    <div class="max-w-sm w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center shadow-2xl space-y-4">
+      <div class="text-4xl">⏳</div>
+      <h2 class="text-xl font-extrabold text-slate-100">Temporarily Unavailable</h2>
+      <p class="text-xs text-slate-400">
+        Service is currently paused. Please wait until the timer completes.
+      </p>
+      <div id="silent-block-timer" class="text-3xl font-mono font-black text-amber-400 tracking-wider">02:00</div>
+    </div>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- TOAST NOTIFICATION CONTAINER                              -->
+  <!-- ========================================================= -->
+  <div id="toast-container" class="fixed top-4 right-4 z-[90] space-y-2 max-w-sm w-full pointer-events-none"></div>
+
+  <!-- ========================================================= -->
+  <!-- LOGIN & FIRST-TIME MASTER ADMIN SETUP SCREEN              -->
+  <!-- ========================================================= -->
+  <div id="login-screen" class="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-emerald-950 to-slate-900">
+    <div class="w-full max-w-md space-y-4">
+      <!-- Brand Header -->
+      <div class="text-center space-y-2">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/15 text-emerald-300 text-xs font-bold">
+          🌾 APMC Market Yard • Multi-Pedhi Cloud
+        </div>
+        <h1 class="text-2xl sm:text-3xl font-black text-white tracking-tight">Ganj Bazar Pedhi Hisab</h1>
+        <div class="flex items-center justify-center gap-2 text-xs text-slate-300">
+          <span id="login-live-clock" class="font-mono">--/--/---- --:--:-- --</span>
+          <span>•</span>
+          <span id="login-cloud-status" class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-200 border border-amber-400/30">
+            Checking API...
+          </span>
+        </div>
+      </div>
+
+      <!-- FIRST-TIME SETUP CARD (Shown ONLY when MongoDB has 0 users) -->
+      <div id="setup-card" class="hidden bg-white rounded-3xl shadow-2xl border border-slate-200 p-6 sm:p-7 space-y-4">
+        <div class="border-b border-slate-100 pb-3">
+          <span class="inline-block px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 text-[10px] font-extrabold uppercase">First-Time Setup</span>
+          <h2 class="text-lg font-black text-slate-900 mt-1">Create Master Admin Account</h2>
+          <p class="text-xs text-slate-500">Zero hardcoded passwords — apna secure Admin ID, Password aur 6-digit Delete PIN set karein.</p>
+        </div>
+
+        <div id="setup-error-box" class="hidden p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold"></div>
+
+        <form id="initial-setup-form" onsubmit="handleInitialSetup(event)" class="space-y-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Master Admin User ID (min 4 chars)</label>
+            <input id="setup-admin-uid" type="text" required minlength="4" placeholder="e.g., masteradmin" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Strong Password (8+ chars, letters + numbers)</label>
+            <input id="setup-admin-pass" type="password" required minlength="8" placeholder="e.g., Pedhi@2026" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">6-Digit Delete Security PIN</label>
+            <input id="setup-admin-pin" type="password" required pattern="\d{6}" maxlength="6" placeholder="Exact 6 digits (e.g., 482910)" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          </div>
+          <div class="grid grid-cols-2 gap-2.5">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Pedhi 1 Name</label>
+              <input id="setup-shop1-name" type="text" required value="Pedhi 1" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Pedhi 2 Name</label>
+              <input id="setup-shop2-name" type="text" required value="Pedhi 2" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
+            </div>
+          </div>
+          <button type="submit" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm shadow-md transition">
+            Initialize Secure MongoDB System →
+          </button>
+        </form>
+      </div>
+
+      <!-- SECURE LOGIN CARD -->
+      <div id="login-card" class="bg-white rounded-3xl shadow-2xl border border-slate-200 p-6 sm:p-7 space-y-5">
+        <div>
+          <h2 class="text-lg font-black text-slate-900">Secure Account Login</h2>
+          <p class="text-xs text-slate-500">Apni Pedhi ya Master Admin ka User ID & Password dalein</p>
+        </div>
+
+        <div id="lockout-banner" class="hidden p-3.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-800 text-xs font-bold flex items-center justify-between">
+          <span>🔒 Too many failed attempts. Locked for:</span>
+          <span id="lockout-timer" class="font-mono text-sm font-black">05:00</span>
+        </div>
+
+        <div id="login-error-box" class="hidden p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold"></div>
+
+        <form id="login-form" onsubmit="handleLogin(event)" class="space-y-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">User ID</label>
+            <input id="login-userid" type="text" required autocomplete="username" placeholder="Enter your User ID" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Password</label>
+            <div class="relative">
+              <input id="login-password" type="password" required autocomplete="current-password" placeholder="Enter your Password" class="w-full px-3.5 py-2.5 pr-16 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+              <button type="button" id="toggle-pwd-btn" onclick="toggleLoginPassword()" class="absolute right-2.5 top-1/2 -translate-y-1/2 px-2 py-1 text-[11px] font-bold text-slate-500 hover:text-slate-800">
+                Show
+              </button>
+            </div>
+          </div>
+
+          <!-- Human Verification Math Captcha -->
+          <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-extrabold text-slate-600 uppercase">Security Captcha</span>
+              <button type="button" onclick="refreshCaptcha()" class="text-[11px] font-bold text-emerald-700 hover:underline">↻ New Code</button>
+            </div>
+            <div class="flex items-center gap-2.5">
+              <div id="captcha-question" class="px-3.5 py-2 rounded-lg bg-slate-900 text-emerald-300 font-mono font-black text-sm tracking-widest select-none">
+                5 + 3 = ?
+              </div>
+              <input id="captcha-answer" type="number" required placeholder="Answer" class="flex-1 px-3 py-2 rounded-lg border border-slate-300 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            </div>
+          </div>
+
+          <button id="login-submit-btn" type="submit" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-400 text-white font-extrabold text-sm shadow-lg transition">
+            Verify & Login →
+          </button>
+        </form>
+      </div>
+
+      <p class="text-center text-[11px] text-slate-400">
+        🔒 Server-Side bcrypt + JWT Encrypted • MongoDB Brute-Force & URL Protection
+      </p>
+    </div>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- MAIN APPLICATION SHELL (SIDEBAR + TOPBAR + VIEWS)         -->
+  <!-- ========================================================= -->
+  <div id="app-shell" class="hidden min-h-screen flex flex-col lg:flex-row">
+
+    <!-- Mobile Sidebar Overlay -->
+    <div id="mobile-sidebar-backdrop" onclick="toggleMobileSidebar(false)" class="hidden fixed inset-0 bg-slate-950/60 z-40 lg:hidden"></div>
+
+    <!-- LEFT SIDEBAR MENU -->
+    <aside id="app-sidebar" class="fixed lg:sticky top-0 left-0 z-50 h-screen w-72 bg-emerald-950 text-slate-100 flex flex-col shrink-0 transition-transform duration-200 -translate-x-full lg:translate-x-0 shadow-2xl">
+      <!-- Shop Brand -->
+      <div class="p-4 border-b border-white/10 flex items-center justify-between gap-2">
+        <div class="min-w-0">
+          <div id="sidebar-shop-badge" class="inline-block px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase bg-emerald-500 text-white">
+            Active Pedhi
+          </div>
+          <h2 id="sidebar-shop-name" class="text-base font-black truncate mt-1">Pedhi 1</h2>
+          <p id="sidebar-user-label" class="text-[11px] text-slate-300 truncate">@user</p>
+        </div>
+        <button type="button" onclick="toggleMobileSidebar(false)" class="lg:hidden p-1.5 rounded-lg bg-white/10 text-white text-sm">✕</button>
+      </div>
+
+      <!-- Navigation List with Proximity Spotlight -->
+      <nav id="sidebar-nav" class="flex-1 p-3 space-y-5">
+        <div id="sidebar-spotlight"></div>
+
+        <!-- SECTION 1: TOTAL & REPORTS -->
+        <div class="space-y-1">
+          <div class="px-3 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">📊 Total & Reports</div>
+          <button type="button" data-view="dashboard" onclick="navigate('dashboard')" class="nav-item w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 text-left">
+            <span>🏠</span><span>Dashboard (Total Hisab)</span>
+          </button>
+          <button type="button" data-view="rojmel-list" onclick="navigate('rojmel-list')" class="nav-item w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 text-left">
+            <span>📒</span><span>Rojmel Register</span>
+          </button>
+          <button type="button" data-view="khatavahi" onclick="navigate('khatavahi')" class="nav-item w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 text-left">
+            <span>👥</span><span>Khatavahi (Party Ledger)</span>
+          </button>
+          <button type="button" data-view="reports" onclick="navigate('reports')" class="nav-item w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 text-left">
+            <span>📑</span><span>Patti, Bardan & Stock</span>
+          </button>
+        </div>
+
+        <!-- SECTION 2: ADD NEW ENTRY -->
+        <div class="space-y-1">
+          <div class="px-3 text-[10px] font-extrabold uppercase tracking-wider text-emerald-300">➕ Add New Entry</div>
+          <button type="button" data-view="add-patti" onclick="navigate('add-patti')" class="nav-item w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 text-left">
+            <span>🧾</span><span>+ Add Khedut Patti</span>
+          </button>
+          <button type="button" data-view="add-rojmel" onclick="navigate('add-rojmel')" class="nav-item w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 text-left">
+            <span>💰</span><span>+ Add Rojmel (Jama/Udhar)</span>
+          </button>
+          <button type="button" id="nav-add-bardan-stock" data-view="add-bardan-stock" onclick="navigate('add-bardan-stock')" class="nav-item w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 text-left">
+            <span>📦</span><span>+ Add Bardan / Stock</span>
+          </button>
+          <button type="button" data-view="add-party" onclick="navigate('add-party')" class="nav-item w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 text-left">
+            <span>🧑‍🌾</span><span>+ Add Khedut / Vyapari</span>
+          </button>
+        </div>
+
+        <!-- SECTION 3: MASTER ADMIN ONLY -->
+        <div id="sidebar-admin-section" class="hidden space-y-1 pt-2 border-t border-white/10">
+          <div class="px-3 text-[10px] font-extrabold uppercase tracking-wider text-purple-300">👑 Master Admin</div>
+          <button type="button" data-view="admin-dashboard" onclick="navigate('admin-dashboard')" class="nav-item w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 text-left">
+            <span>🏢</span><span>All Shops Combined</span>
+          </button>
+          <button type="button" data-view="admin-users" onclick="navigate('admin-users')" class="nav-item w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 text-left">
+            <span>🔑</span><span>Users & Shops Control</span>
+          </button>
+          <button type="button" data-view="admin-features" onclick="navigate('admin-features')" class="nav-item w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 text-left">
+            <span>⚙️</span><span>Features & Upgrades</span>
+          </button>
+          <button type="button" data-view="admin-audit" onclick="navigate('admin-audit')" class="nav-item w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 text-left">
+            <span>🛡️</span><span>Security Audit Log</span>
+          </button>
+          <button type="button" data-view="admin-backup" onclick="navigate('admin-backup')" class="nav-item w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-200 text-left">
+            <span>💾</span><span>Long-Term Backup</span>
+          </button>
+        </div>
+      </nav>
+
+      <!-- Sidebar Footer Logout -->
+      <div class="p-3 border-t border-white/10">
+        <button type="button" onclick="handleLogout('Manual Logout')" class="w-full py-2.5 px-3 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/30 text-rose-200 font-bold text-xs flex items-center justify-center gap-2 transition">
+          <span>🚪</span><span>Safe Logout</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- RIGHT CONTENT AREA -->
+    <div class="flex-1 flex flex-col min-w-0">
+
+      <!-- TOP HEADER BAR -->
+      <header class="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200 px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+          <button type="button" onclick="toggleMobileSidebar(true)" class="lg:hidden p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold">
+            ☰
+          </button>
+          <div class="min-w-0">
+            <h1 id="topbar-title" class="text-base sm:text-lg font-black text-slate-900 truncate">Dashboard (Total Hisab)</h1>
+            <p id="topbar-shop-address" class="text-[11px] text-slate-500 truncate">APMC Market Yard</p>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- Admin Only: Switch Active Shop Inspector -->
+          <div id="admin-shop-inspector" class="hidden flex items-center gap-1.5 bg-purple-50 border border-purple-200 px-2.5 py-1.5 rounded-xl">
+            <span class="text-[10px] font-extrabold text-purple-700 uppercase">Inspect Shop:</span>
+            <select id="admin-shop-switcher" onchange="switchActiveShop(this.value)" class="bg-transparent text-xs font-extrabold text-purple-950 focus:outline-none"></select>
+          </div>
+
+          <!-- Live Date & Time with Seconds -->
+          <div class="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200 text-xs font-mono font-bold text-slate-700">
+            <span>🕒</span>
+            <span id="header-live-clock">--/--/---- --:--:-- --</span>
+          </div>
+
+          <!-- Privacy Eye Button -->
+          <button type="button" id="privacy-eye-btn" onclick="togglePrivacyMode()" title="Hide/Show Rupee Amounts" class="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs font-bold text-slate-700 flex items-center gap-1.5 transition">
+            <span>👁️</span><span class="hidden sm:inline">Privacy</span>
+          </button>
+
+          <!-- Refresh Data Button -->
+          <button type="button" id="refresh-data-btn" onclick="refreshAllData()" title="Refresh Latest MongoDB Data" class="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-xs font-extrabold text-emerald-800 flex items-center gap-1.5 transition">
+            <span id="refresh-btn-icon" class="inline-block">🔄</span><span>Refresh</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- MAIN VIEWS CONTAINER -->
+      <main class="flex-1 p-4 sm:p-6 max-w-7xl w-full mx-auto space-y-6">
+
+        <!-- ===================================================== -->
+        <!-- VIEW 1: SHOP DASHBOARD (TOTAL HISAB)                  -->
+        <!-- ===================================================== -->
+        <section id="view-dashboard" class="app-view space-y-6">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs">
+              <div class="text-xs font-bold text-slate-500">Aaj ka Jama (Cash In)</div>
+              <div id="kpi-today-jama" class="text-2xl font-black text-emerald-600 mt-1 amt-sensitive">₹0</div>
+              <div class="text-[11px] text-slate-400 mt-1">Today's Rojmel Credit</div>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs">
+              <div class="text-xs font-bold text-slate-500">Aaj ka Udhar (Cash Out)</div>
+              <div id="kpi-today-udhar" class="text-2xl font-black text-rose-600 mt-1 amt-sensitive">₹0</div>
+              <div class="text-[11px] text-slate-400 mt-1">Today's Rojmel Debit</div>
+            </div>
+            <div class="bg-white rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4 shadow-xs">
+              <div class="text-xs font-bold text-emerald-800">Net Cash Balance (Rojmel)</div>
+              <div id="kpi-net-cash" class="text-2xl font-black text-emerald-950 mt-1 amt-sensitive">₹0</div>
+              <div class="text-[11px] text-emerald-700 mt-1">Total Jama − Total Udhar</div>
+            </div>
+            <div class="bg-white rounded-2xl border border-amber-200 bg-amber-50/40 p-4 shadow-xs">
+              <div class="text-xs font-bold text-amber-900">Total Haraji / Patti Value</div>
+              <div id="kpi-patti-total" class="text-2xl font-black text-amber-950 mt-1 amt-sensitive">₹0</div>
+              <div id="kpi-patti-count" class="text-[11px] text-amber-700 mt-1">0 Pattis Saved</div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs">
+              <div class="text-xs font-bold text-slate-500">Vyapari Lena Baki</div>
+              <div id="kpi-vyapari-baki" class="text-xl font-black text-blue-700 mt-1 amt-sensitive">₹0</div>
+              <div class="text-[11px] text-slate-400 mt-1">Receivable from Buyers</div>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs">
+              <div class="text-xs font-bold text-slate-500">Khedut Dena Baki</div>
+              <div id="kpi-khedut-baki" class="text-xl font-black text-orange-600 mt-1 amt-sensitive">₹0</div>
+              <div class="text-[11px] text-slate-400 mt-1">Payable to Farmers</div>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs">
+              <div class="text-xs font-bold text-slate-500">Pending Bardan (Bori)</div>
+              <div id="kpi-pending-bardan" class="text-xl font-black text-slate-800 mt-1">0 Bori</div>
+              <div class="text-[11px] text-slate-400 mt-1">Issued − Returned</div>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs">
+              <div class="text-xs font-bold text-slate-500">Godown Stock Balance</div>
+              <div id="kpi-stock-balance" class="text-lg font-black text-indigo-700 mt-1">0 Man</div>
+              <div id="kpi-stock-sub" class="text-[11px] text-slate-400 mt-1">0 Kg • 0 Bori</div>
+            </div>
+          </div>
+
+          <!-- Quick Action Buttons -->
+          <div class="flex flex-wrap gap-2.5">
+            <button type="button" onclick="navigate('add-patti')" class="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-sm">🧾 + New Khedut Patti</button>
+            <button type="button" onclick="navigate('add-rojmel')" class="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-sm">💰 + New Rojmel Entry</button>
+            <button type="button" onclick="navigate('add-bardan-stock')" class="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-extrabold shadow-sm">📦 + Bardan / Stock</button>
+            <button type="button" onclick="navigate('add-party')" class="px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 text-xs font-extrabold">🧑‍🌾 + New Party</button>
+          </div>
+
+          <!-- Recent Activity Table -->
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
+              <h3 class="font-extrabold text-sm text-slate-800">Recent Rojmel & Patti Activity</h3>
+              <button type="button" onclick="navigate('rojmel-list')" class="text-xs font-bold text-emerald-700 hover:underline">View All →</button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 text-slate-500 uppercase text-[10px]">
+                  <tr>
+                    <th class="px-4 py-2.5">Date & Time</th>
+                    <th class="px-4 py-2.5">Type</th>
+                    <th class="px-4 py-2.5">Party / Details</th>
+                    <th class="px-4 py-2.5 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody id="dashboard-recent-tbody" class="divide-y divide-slate-100"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================================================== -->
+        <!-- VIEW 2: ROJMEL REGISTER                               -->
+        <!-- ===================================================== -->
+        <section id="view-rojmel-list" class="app-view hidden space-y-4">
+          <div class="bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-3">
+            <input id="rojmel-search" type="text" oninput="renderRojmelList()" placeholder="Search party, note, date..." class="w-full sm:w-72 px-3.5 py-2 rounded-xl border border-slate-300 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="exportCSV('rojmel')" class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold">📥 Export CSV</button>
+              <button type="button" onclick="navigate('add-rojmel')" class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold">+ Add Rojmel</button>
+            </div>
+          </div>
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 text-slate-500 uppercase text-[10px]">
+                  <tr>
+                    <th class="px-4 py-3">Date & Exact Time</th>
+                    <th class="px-4 py-3">Type</th>
+                    <th class="px-4 py-3">Party / Vigat</th>
+                    <th class="px-4 py-3">Mode</th>
+                    <th class="px-4 py-3 text-right">Amount (₹)</th>
+                    <th class="px-4 py-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="rojmel-tbody" class="divide-y divide-slate-100"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================================================== -->
+        <!-- VIEW 3: KHATAVAHI (PARTY LEDGER)                      -->
+        <!-- ===================================================== -->
+        <section id="view-khatavahi" class="app-view hidden space-y-4">
+          <div class="bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <button type="button" onclick="setPartyFilter('all')" id="pf-all" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-white">All Parties</button>
+              <button type="button" onclick="setPartyFilter('khedut')" id="pf-khedut" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-700">🧑‍🌾 Khedut</button>
+              <button type="button" onclick="setPartyFilter('vyapari')" id="pf-vyapari" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-700">🏪 Vyapari</button>
+              <input id="party-search" type="text" oninput="renderKhatavahi()" placeholder="Search name or village..." class="px-3 py-1.5 rounded-lg border border-slate-300 text-xs" />
+            </div>
+            <button type="button" onclick="navigate('add-party')" class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold">+ Add Party</button>
+          </div>
+          <div id="khatavahi-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+        </section>
+
+        <!-- ===================================================== -->
+        <!-- VIEW 4: PATTI, BARDAN & STOCK REPORTS                 -->
+        <!-- ===================================================== -->
+        <section id="view-reports" class="app-view hidden space-y-4">
+          <div class="bg-white rounded-2xl border border-slate-200 p-3 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex flex-wrap gap-2">
+              <button type="button" onclick="switchReportSubtab('pattis')" id="rtab-pattis" class="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-emerald-600 text-white">🧾 Khedut Pattis</button>
+              <button type="button" onclick="switchReportSubtab('bardan')" id="rtab-bardan" class="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-slate-100 text-slate-700">🎒 Bardan Register</button>
+              <button type="button" onclick="switchReportSubtab('stock')" id="rtab-stock" class="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-slate-100 text-slate-700">🌾 Godown Stock</button>
+            </div>
+            <button type="button" onclick="exportCSV(activeReportSubtab)" class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold">📥 Export CSV</button>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div id="report-table-wrap" class="overflow-x-auto"></div>
+          </div>
+        </section>
+
+        <!-- ===================================================== -->
+        <!-- VIEW 5: + ADD KHEDUT PATTI (HARAJI BILL)              -->
+        <!-- ===================================================== -->
+        <section id="view-add-patti" class="app-view hidden">
+          <form id="form-patti" onsubmit="savePatti(event)" class="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 sm:p-6 space-y-5">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+              <div>
+                <h2 class="text-base font-black text-slate-900">🧾 Nayi Khedut Patti (Haraji Bill)</h2>
+                <p class="text-xs text-slate-500">1 Man = 20 Kg auto calculation • Exact timestamp seconds ke sath save hoga</p>
+              </div>
+              <span class="live-form-clock px-3 py-1 rounded-lg bg-slate-100 font-mono text-xs font-bold text-slate-700">--:--:--</span>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Bill Date</label>
+                <input id="patti-date" type="date" required class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Khedut (Farmer) *</label>
+                <select id="patti-farmer" required class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold"></select>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Vyapari / Kharidnar</label>
+                <select id="patti-buyer" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold"></select>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-5 gap-3">
+              <div class="sm:col-span-2">
+                <label class="block text-xs font-bold text-slate-700 mb-1">Fasal (Crop) *</label>
+                <select id="patti-crop" required class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold"></select>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Bori (Bags)</label>
+                <input id="patti-bags" type="number" min="0" value="10" oninput="recalcPatti()" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Vajan (Total Kg) *</label>
+                <input id="patti-kg" type="number" step="0.1" min="0.1" required value="500" oninput="recalcPatti()" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Bhav (₹ / 20 Kg Man) *</label>
+                <input id="patti-rate" type="number" step="0.5" min="1" required value="2500" oninput="recalcPatti()" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold" />
+              </div>
+            </div>
+
+            <!-- Deductions Grid -->
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 p-4 rounded-2xl bg-slate-50 border border-slate-200">
+              <div>
+                <label class="block text-[11px] font-bold text-slate-600 mb-1">Hamali (₹/Bori)</label>
+                <input id="patti-hamali-rate" type="number" step="0.5" value="10" oninput="recalcPatti()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-bold bg-white" />
+              </div>
+              <div>
+                <label class="block text-[11px] font-bold text-slate-600 mb-1">Tolai (₹)</label>
+                <input id="patti-tolai" type="number" step="1" value="0" oninput="recalcPatti()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-bold bg-white" />
+              </div>
+              <div>
+                <label class="block text-[11px] font-bold text-slate-600 mb-1">Dalali (%)</label>
+                <input id="patti-dalali-pct" type="number" step="0.1" value="2" oninput="recalcPatti()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-bold bg-white" />
+              </div>
+              <div id="patti-cess-wrap">
+                <label class="block text-[11px] font-bold text-slate-600 mb-1">APMC Cess (%)</label>
+                <input id="patti-cess-pct" type="number" step="0.1" value="0.5" oninput="recalcPatti()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-bold bg-white" />
+              </div>
+              <div id="patti-gst-wrap" class="hidden">
+                <label class="block text-[11px] font-bold text-slate-600 mb-1">GST (%)</label>
+                <input id="patti-gst-pct" type="number" step="0.1" value="0" oninput="recalcPatti()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-bold bg-white" />
+              </div>
+              <div>
+                <label class="block text-[11px] font-bold text-slate-600 mb-1">Bardan Kharch (₹)</label>
+                <input id="patti-bardan" type="number" step="1" value="0" oninput="recalcPatti()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-bold bg-white" />
+              </div>
+              <div>
+                <label class="block text-[11px] font-bold text-slate-600 mb-1">Juni Upad (₹)</label>
+                <input id="patti-upad" type="number" step="1" value="0" oninput="recalcPatti()" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-bold bg-white" />
+              </div>
+            </div>
+
+            <!-- Live Summary + Payment Mode Selector -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-center">
+              <div class="p-4 rounded-2xl bg-emerald-950 text-white space-y-1.5">
+                <div class="flex justify-between text-xs text-emerald-200">
+                  <span>Total Man (20 Kg):</span>
+                  <span id="calc-man" class="font-bold">25.00 Man</span>
+                </div>
+                <div class="flex justify-between text-xs text-emerald-200">
+                  <span>Gross Rakam:</span>
+                  <span id="calc-gross" class="font-bold amt-sensitive">₹62,500</span>
+                </div>
+                <div class="flex justify-between text-xs text-rose-300">
+                  <span>Total Kharch / Kapat:</span>
+                  <span id="calc-deductions" class="font-bold amt-sensitive">- ₹1,662.50</span>
+                </div>
+                <div class="pt-2 border-t border-white/15 flex justify-between items-center">
+                  <span class="text-xs font-extrabold uppercase">Khedut Net Payable:</span>
+                  <span id="calc-net" class="text-2xl font-black text-emerald-400 amt-sensitive">₹60,837.50</span>
+                </div>
+              </div>
+
+              <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+                <div class="text-xs font-extrabold text-slate-800">Payment Mode (Dashboard Auto-Update):</div>
+                <div class="grid grid-cols-2 gap-2.5">
+                  <label class="flex items-center gap-2 p-3 rounded-xl border border-emerald-300 bg-emerald-50 cursor-pointer">
+                    <input type="radio" name="patti-pay-mode" value="paid" checked class="accent-emerald-600" />
+                    <div class="text-xs">
+                      <div class="font-extrabold text-emerald-900">💵 Rokad / Cash Paid</div>
+                      <div class="text-[10px] text-emerald-700">Rojmel & Net Cash update hoga</div>
+                    </div>
+                  </label>
+                  <label class="flex items-center gap-2 p-3 rounded-xl border border-amber-300 bg-amber-50 cursor-pointer">
+                    <input type="radio" name="patti-pay-mode" value="baki" class="accent-amber-600" />
+                    <div class="text-xs">
+                      <div class="font-extrabold text-amber-900">📒 Baki / Udhar</div>
+                      <div class="text-[10px] text-amber-700">Khedut Dena Baki me judega</div>
+                    </div>
+                  </label>
+                </div>
+                <button type="submit" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm shadow-md transition">
+                  ✅ Save Khedut Patti & Print Receipt
+                </button>
+              </div>
+            </div>
+          </form>
+        </section>
+
+        <!-- ===================================================== -->
+        <!-- VIEW 6: + ADD ROJMEL ENTRY                            -->
+        <!-- ===================================================== -->
+        <section id="view-add-rojmel" class="app-view hidden">
+          <form id="form-rojmel" onsubmit="saveRojmel(event)" class="max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-xs p-5 sm:p-6 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h2 class="text-base font-black text-slate-900">💰 Nayi Rojmel Entry (Cash Book)</h2>
+                <p class="text-xs text-slate-500">Jama (Cash In) ya Udhar (Cash Out) entry save karein</p>
+              </div>
+              <span class="live-form-clock px-3 py-1 rounded-lg bg-slate-100 font-mono text-xs font-bold text-slate-700">--:--:--</span>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Date</label>
+                <input id="rojmel-date" type="date" required class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Transaction Type *</label>
+                <select id="rojmel-type" required class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold">
+                  <option value="jama">🟢 Jama (Paisa Aaya / Cash In)</option>
+                  <option value="udhar">🔴 Udhar (Paisa Gaya / Cash Out)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Party (Optional — Khatavahi auto-sync)</label>
+                <select id="rojmel-party" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold"></select>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Payment Mode</label>
+                <select id="rojmel-mode" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold">
+                  <option value="Cash">💵 Cash (Rokad)</option>
+                  <option value="RTGS/NEFT">🏦 RTGS / NEFT</option>
+                  <option value="UPI">📱 UPI</option>
+                  <option value="Cheque">🧾 Cheque</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Amount (₹) *</label>
+              <input id="rojmel-amount" type="number" step="0.01" min="1" required placeholder="e.g., 15000" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-base font-black" />
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Vigat / Description *</label>
+              <input id="rojmel-note" type="text" required placeholder="e.g., Vyapari payment received / Dukan kharch / Khedut upad" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs" />
+            </div>
+
+            <button type="submit" class="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-sm shadow-md">
+              ✅ Save Rojmel Entry
+            </button>
+          </form>
+        </section>
+
+        <!-- ===================================================== -->
+        <!-- VIEW 7: + ADD BARDAN & GODOWN STOCK                   -->
+        <!-- ===================================================== -->
+        <section id="view-add-bardan-stock" class="app-view hidden grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <!-- Bardan Form -->
+          <form id="form-bardan" onsubmit="saveBardan(event)" class="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-4">
+            <div class="border-b border-slate-100 pb-2.5">
+              <h2 class="text-base font-black text-slate-900">🎒 Bardan (Khali Bori) Entry</h2>
+              <p class="text-xs text-slate-500">Kisko kitni khali bori di ya wapas aayi</p>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Date</label>
+                <input id="bardan-date" type="date" required class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Type</label>
+                <select id="bardan-type" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold">
+                  <option value="issued">📤 Diya (Issued)</option>
+                  <option value="returned">📥 Wapas Aaya (Returned)</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Party Name *</label>
+              <select id="bardan-party" required class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold"></select>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Quantity (Bori) *</label>
+                <input id="bardan-qty" type="number" min="1" required placeholder="e.g., 50" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Note</label>
+                <input id="bardan-note" type="text" placeholder="Jute / Plastic bori" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+              </div>
+            </div>
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs">
+              ✅ Save Bardan Entry
+            </button>
+          </form>
+
+          <!-- Godown Stock Form -->
+          <form id="form-stock" onsubmit="saveStock(event)" class="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-4">
+            <div class="border-b border-slate-100 pb-2.5">
+              <h2 class="text-base font-black text-slate-900">🌾 Godown Fasal Stock Entry</h2>
+              <p class="text-xs text-slate-500">Maal Kharid (Stock In) ya Vechan (Stock Out)</p>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Date</label>
+                <input id="stock-date" type="date" required class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Type</label>
+                <select id="stock-type" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold">
+                  <option value="in">📥 Stock In (Kharid)</option>
+                  <option value="out">📤 Stock Out (Vechan)</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Fasal (Crop) *</label>
+              <select id="stock-crop" required class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold"></select>
+            </div>
+            <div class="grid grid-cols-3 gap-2.5">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Bori</label>
+                <input id="stock-bags" type="number" min="0" value="0" class="w-full px-2.5 py-2 rounded-xl border border-slate-300 text-xs font-bold" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Total Kg *</label>
+                <input id="stock-kg" type="number" step="0.1" min="0.1" required placeholder="e.g., 1000" class="w-full px-2.5 py-2 rounded-xl border border-slate-300 text-xs font-bold" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Total Value (₹)</label>
+                <input id="stock-amount" type="number" step="1" min="0" value="0" class="w-full px-2.5 py-2 rounded-xl border border-slate-300 text-xs font-bold" />
+              </div>
+            </div>
+            <label class="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-900 cursor-pointer">
+              <input id="stock-post-rojmel" type="checkbox" class="accent-emerald-600" />
+              <span>Cash Transaction (Rojmel & Net Cash me bhi entry karo)</span>
+            </label>
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs">
+              ✅ Save Godown Stock
+            </button>
+          </form>
+        </section>
+
+        <!-- ===================================================== -->
+        <!-- VIEW 8: + ADD PARTY (KHEDUT / VYAPARI)                -->
+        <!-- ===================================================== -->
+        <section id="view-add-party" class="app-view hidden">
+          <form id="form-party" onsubmit="saveParty(event)" class="max-w-xl bg-white rounded-2xl border border-slate-200 shadow-xs p-5 sm:p-6 space-y-4">
+            <div class="border-b border-slate-100 pb-3">
+              <h2 class="text-base font-black text-slate-900">🧑‍🌾 Naya Khedut ya Vyapari Khata</h2>
+              <p class="text-xs text-slate-500">Khatavahi aur Khedut Patti ke liye party add karein</p>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Party Name *</label>
+                <input id="party-name" type="text" required placeholder="e.g., Patel Rameshbhai" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Category *</label>
+                <select id="party-type" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold">
+                  <option value="khedut">🧑‍🌾 Khedut (Farmer)</option>
+                  <option value="vyapari">🏪 Vyapari (Buyer / Mill)</option>
+                </select>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Mobile Number</label>
+                <input id="party-phone" type="tel" placeholder="10-digit mobile" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Gaam / City</label>
+                <input id="party-village" type="text" placeholder="e.g., Unjha / Patan" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+              </div>
+            </div>
+            <button type="submit" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm">
+              ✅ Save Party Account
+            </button>
+          </form>
+        </section>
+
+        <!-- ===================================================== -->
+        <!-- ADMIN VIEW 1: ALL SHOPS COMBINED DASHBOARD            -->
+        <!-- ===================================================== -->
+        <section id="view-admin-dashboard" class="app-view hidden space-y-6">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="admin-combined-kpis"></div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="admin-shops-breakdown"></div>
+        </section>
+
+        <!-- ===================================================== -->
+        <!-- ADMIN VIEW 2: USERS & SHOPS CONTROL                   -->
+        <!-- ===================================================== -->
+        <section id="view-admin-users" class="app-view hidden space-y-6">
+          <!-- Users Table -->
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div class="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 class="font-extrabold text-slate-900 text-sm sm:text-base">🔑 Shop Users & Staff Accounts</h3>
+                <p class="text-xs text-slate-500">ID/Password badalte hi purani credentials aur purana login session turant band ho jata hai</p>
+              </div>
+              <button type="button" onclick="openUserModal(null)" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-sm">
+                ➕ Add New User
+              </button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 text-slate-500 uppercase text-[10px]">
+                  <tr>
+                    <th class="px-4 py-3">Name</th>
+                    <th class="px-4 py-3">User ID</th>
+                    <th class="px-4 py-3">Assigned Shop</th>
+                    <th class="px-4 py-3">Role / Status</th>
+                    <th class="px-4 py-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="admin-users-tbody" class="divide-y divide-slate-100"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Shops Editor -->
+          <div class="space-y-3">
+            <h3 class="font-extrabold text-slate-900 text-sm sm:text-base">🏪 Pedhi / Shop Profile Settings</h3>
+            <div id="admin-shops-editor" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+          </div>
+
+          <!-- Master Admin Credentials & 6-Digit Delete PIN -->
+          <div class="bg-white rounded-2xl border border-purple-200 shadow-xs p-5 space-y-4">
+            <div>
+              <h3 class="font-extrabold text-purple-950 text-sm sm:text-base">🔐 Master Admin Credentials & 6-Digit Delete PIN</h3>
+              <p class="text-xs text-slate-500">Sabhi passwords aur PIN MongoDB server par bcrypt (12 rounds) se encrypt hote hain</p>
+            </div>
+            <form onsubmit="updateAdminCredentials(event)" class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Admin User ID</label>
+                <input id="adm-self-uid" type="text" required class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">New Password (optional)</label>
+                <input id="adm-self-pass" type="password" placeholder="Leave blank to keep" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">New 6-Digit PIN (optional)</label>
+                <input id="adm-self-pin" type="password" maxlength="6" placeholder="Exact 6 digits" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono" />
+              </div>
+              <button type="submit" class="py-2.5 px-4 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-extrabold text-xs">
+                Update Security
+              </button>
+            </form>
+          </div>
+        </section>
+
+        <!-- ===================================================== -->
+        <!-- ADMIN VIEW 3: FEATURES & UPGRADE CONTROLS             -->
+        <!-- ===================================================== -->
+        <section id="view-admin-features" class="app-view hidden space-y-6">
+          <form onsubmit="saveFeatureSettings(event)" class="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-5">
+            <h3 class="font-extrabold text-slate-900 text-base">⚙️ Feature Toggles & Default Mandi Rates</h3>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <label class="flex items-center gap-2 p-3 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer">
+                <input id="cfg-bardan" type="checkbox" class="accent-emerald-600" /> Bardan Module
+              </label>
+              <label class="flex items-center gap-2 p-3 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer">
+                <input id="cfg-stock" type="checkbox" class="accent-emerald-600" /> Godown Stock
+              </label>
+              <label class="flex items-center gap-2 p-3 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer">
+                <input id="cfg-cess" type="checkbox" class="accent-emerald-600" /> APMC Cess (%)
+              </label>
+              <label class="flex items-center gap-2 p-3 rounded-xl border border-slate-200 text-xs font-bold cursor-pointer">
+                <input id="cfg-gst" type="checkbox" class="accent-emerald-600" /> GST Field (%)
+              </label>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div>
+                <label class="block text-xs font-bold text-slate-600 mb-1">Dalali (%)</label>
+                <input id="cfg-dalali" type="number" step="0.1" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-600 mb-1">Hamali (₹/Bori)</label>
+                <input id="cfg-hamali" type="number" step="0.5" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-600 mb-1">Tolai (₹)</label>
+                <input id="cfg-tolai" type="number" step="1" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-600 mb-1">APMC Cess (%)</label>
+                <input id="cfg-cess-pct" type="number" step="0.1" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-600 mb-1">Auto-Logout (Min)</label>
+                <input id="cfg-inactivity" type="number" min="1" max="120" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold" />
+              </div>
+            </div>
+            <button type="submit" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs">
+              ✅ Save Feature Settings
+            </button>
+          </form>
+
+          <!-- Crop List Manager -->
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-4">
+            <h3 class="font-extrabold text-slate-900 text-sm">🌾 Fasal (Crop) Master List</h3>
+            <div class="flex gap-2">
+              <input id="new-crop-input" type="text" placeholder="Add new crop (e.g., Isabgul)" class="flex-1 px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+              <button type="button" onclick="addCropItem()" class="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold">+ Add</button>
+            </div>
+            <div id="crops-chip-list" class="flex flex-wrap gap-2"></div>
+          </div>
+        </section>
+
+        <!-- ===================================================== -->
+        <!-- ADMIN VIEW 4: SECURITY AUDIT LOG                      -->
+        <!-- ===================================================== -->
+        <section id="view-admin-audit" class="app-view hidden space-y-6">
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div class="p-4 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h3 class="font-extrabold text-slate-900 text-sm">🛡️ Security & Activity Audit Log</h3>
+                <p class="text-xs text-slate-500">Login, Failed Attempts, Deletes aur User Updates ka second-level record</p>
+              </div>
+              <button type="button" onclick="refreshAllData()" class="px-3 py-1.5 rounded-lg bg-slate-100 text-xs font-bold">🔄 Refresh</button>
+            </div>
+            <div class="overflow-x-auto max-h-96">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 text-slate-500 uppercase text-[10px] sticky top-0">
+                  <tr>
+                    <th class="px-4 py-2.5">Date & Time</th>
+                    <th class="px-4 py-2.5">User ID</th>
+                    <th class="px-4 py-2.5">Shop</th>
+                    <th class="px-4 py-2.5">Action</th>
+                    <th class="px-4 py-2.5">Details</th>
+                  </tr>
+                </thead>
+                <tbody id="audit-log-tbody" class="divide-y divide-slate-100"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Production MongoDB + Render + GitHub Pages Checklist -->
+          <div class="bg-slate-900 text-slate-100 rounded-2xl border border-slate-700 p-5 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 class="font-extrabold text-sm sm:text-base text-emerald-400">🔐 Live MongoDB + Render + GitHub Security Status</h3>
+                <p class="text-xs text-slate-300">Ye website server-side JWT, bcrypt, CORS domain lock aur strict MongoDB Shop Isolation ke sath connected hai.</p>
+              </div>
+              <span class="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-xs font-extrabold">
+                MongoDB API Active
+              </span>
+            </div>
+            <div class="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-emerald-200 leading-relaxed space-y-1">
+              <div>• Frontend Host : GitHub Pages (index.html — Zero secrets in code)</div>
+              <div>• Backend API   : Node.js + Express (Render / Vercel .env secrets)</div>
+              <div>• Database      : MongoDB Atlas (Mumbai Region — Long-Term Cloud)</div>
+              <div>• Shop Lock     : Server filters { shopId } before sending any data</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================================================== -->
+        <!-- ADMIN VIEW 5: LONG-TERM BACKUP & RESTORE              -->
+        <!-- ===================================================== -->
+        <section id="view-admin-backup" class="app-view hidden space-y-5">
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-4">
+            <div>
+              <h3 class="font-extrabold text-slate-900 text-base">💾 Long-Term MongoDB Backup & Restore</h3>
+              <p class="text-xs text-slate-500">Apne sabhi shops ka complete JSON backup download karein ya purana backup restore karein.</p>
+            </div>
+            <div class="flex flex-wrap gap-3">
+              <button type="button" onclick="downloadFullJSONBackup()" class="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-sm">
+                ⬇️ Download Complete JSON Backup
+              </button>
+              <label class="px-5 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs shadow-sm cursor-pointer">
+                ⬆️ Restore JSON Backup
+                <input type="file" accept=".json" onchange="restoreFullJSONBackup(event)" class="hidden" />
+              </label>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- MODALS (USER ADD/EDIT, PARTY STATEMENT, PATTI, PIN DELETE)-->
+  <!-- ========================================================= -->
+  <div id="modal-backdrop" class="hidden fixed inset-0 z-[80] bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+
+    <!-- MODAL 1: ADD / EDIT USER -->
+    <div id="modal-user" class="modal-box hidden bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 id="um-title" class="font-black text-slate-900 text-base">Add New Shop User</h3>
+        <button type="button" onclick="closeAllModals()" class="text-slate-400 hover:text-slate-700 font-bold">✕</button>
+      </div>
+      <form onsubmit="saveUserFromModal(event)" class="space-y-3">
+        <input type="hidden" id="um-edit-id" />
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Full Name *</label>
+            <input id="um-fullname" type="text" required class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">User ID *</label>
+            <input id="um-username" type="text" required class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Password <span id="um-pwd-hint" class="text-slate-400 font-normal">(8+ chars, A-z + 0-9)</span></label>
+            <input id="um-password" type="password" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Role</label>
+            <select id="um-role" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold">
+              <option value="shop_user">Shop Manager</option>
+              <option value="staff">Shop Staff</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Assigned Pedhi / Shop *</label>
+          <select id="um-shop-select" onchange="toggleNewShopFields()" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold"></select>
+        </div>
+        <div id="um-new-shop-fields" class="hidden p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 space-y-2.5">
+          <div class="text-xs font-extrabold text-emerald-900">Create Brand-New Pedhi / Shop:</div>
+          <div class="grid grid-cols-2 gap-2">
+            <input id="um-new-shop-name" type="text" placeholder="New Shop Name" class="px-2.5 py-1.5 rounded-lg border border-emerald-300 text-xs bg-white" />
+            <select id="um-new-shop-color" class="px-2.5 py-1.5 rounded-lg border border-emerald-300 text-xs bg-white font-bold">
+              <option value="emerald">Emerald Theme</option>
+              <option value="amber">Amber Theme</option>
+              <option value="blue">Blue Theme</option>
+              <option value="rose">Rose Theme</option>
+              <option value="indigo">Indigo Theme</option>
+            </select>
+            <input id="um-new-shop-owner" type="text" placeholder="Owner Name" class="px-2.5 py-1.5 rounded-lg border border-emerald-300 text-xs bg-white" />
+            <input id="um-new-shop-phone" type="text" placeholder="Phone" class="px-2.5 py-1.5 rounded-lg border border-emerald-300 text-xs bg-white" />
+          </div>
+          <input id="um-new-shop-address" type="text" placeholder="APMC Address" class="w-full px-2.5 py-1.5 rounded-lg border border-emerald-300 text-xs bg-white" />
+        </div>
+        <label class="flex items-center gap-2 text-xs font-bold text-slate-700">
+          <input id="um-active" type="checkbox" checked class="accent-emerald-600" /> Account Active (Uncheck to block login)
+        </label>
+        <button type="submit" class="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs">
+          Save User Account
+        </button>
+      </form>
+    </div>
+
+    <!-- MODAL 2: PARTY STATEMENT (KHATAVAHI) -->
+    <div id="modal-statement" class="modal-box hidden bg-white rounded-3xl max-w-3xl w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div>
+          <h3 id="stmt-party-name" class="font-black text-slate-900 text-base">Party Statement</h3>
+          <p id="stmt-party-meta" class="text-xs text-slate-500"></p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="printPartyStatement()" class="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold">🖨️ Print</button>
+          <button type="button" onclick="closeAllModals()" class="p-1.5 text-slate-400 hover:text-slate-700 font-bold">✕</button>
+        </div>
+      </div>
+
+      <form onsubmit="addDirectLedgerEntry(event)" class="grid grid-cols-1 sm:grid-cols-5 gap-2 p-3 rounded-xl bg-slate-50 border border-slate-200">
+        <input id="ledger-date" type="date" required class="px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white" />
+        <select id="ledger-type" class="px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-bold bg-white">
+          <option value="jama">Jama (Credit)</option>
+          <option value="udhar">Udhar (Debit)</option>
+        </select>
+        <input id="ledger-amount" type="number" step="0.01" min="1" required placeholder="Amount ₹" class="px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-bold bg-white" />
+        <input id="ledger-note" type="text" required placeholder="Vigat / Note" class="px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white" />
+        <button type="submit" class="py-1.5 px-3 rounded-lg bg-emerald-600 text-white font-extrabold text-xs">+ Add</button>
+      </form>
+
+      <div class="overflow-x-auto border border-slate-200 rounded-xl">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-50 text-slate-500 uppercase text-[10px]">
+            <tr>
+              <th class="px-3 py-2">Date & Time</th>
+              <th class="px-3 py-2">Vigat</th>
+              <th class="px-3 py-2 text-right">Jama (₹)</th>
+              <th class="px-3 py-2 text-right">Udhar (₹)</th>
+              <th class="px-3 py-2 text-right">Del</th>
+            </tr>
+          </thead>
+          <tbody id="stmt-tbody" class="divide-y divide-slate-100"></tbody>
+        </table>
+      </div>
+      <div id="stmt-footer" class="text-right font-black text-sm text-slate-900 amt-sensitive"></div>
+    </div>
+
+    <!-- MODAL 3: PATTI RECEIPT VIEW & PRINT -->
+    <div id="modal-patti-receipt" class="modal-box hidden bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 class="font-black text-slate-900 text-base">🧾 Khedut Patti Receipt</h3>
+        <button type="button" onclick="closeAllModals()" class="text-slate-400 hover:text-slate-700 font-bold">✕</button>
+      </div>
+      <div id="patti-receipt-body" class="text-xs space-y-2"></div>
+      <button type="button" onclick="printCurrentPatti()" class="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs">
+        🖨️ Print Khedut Patti
+      </button>
+    </div>
+
+    <!-- MODAL 4: 6-DIGIT ADMIN PIN DELETE VERIFICATION -->
+    <div id="modal-pin-delete" class="modal-box hidden bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="font-black text-rose-700 text-base">🔐 Admin PIN Required</h3>
+        <button type="button" onclick="closeAllModals()" class="text-slate-400 hover:text-slate-700 font-bold">✕</button>
+      </div>
+      <p class="text-xs text-slate-600">Entry permanently delete karne ke liye 6-digit Master Admin Security PIN dalein.</p>
+      <div id="delete-pin-error" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold"></div>
+      <form onsubmit="executePinProtectedDelete(event)" class="space-y-3">
+        <input id="delete-pin-input" type="password" maxlength="6" required placeholder="Enter 6-Digit PIN" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-center font-mono text-lg font-black tracking-widest" />
+        <button type="submit" class="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs">
+          Verify PIN & Delete Entry
+        </button>
+      </form>
+    </div>
+
+  </div>
+
+  <!-- PRINT AREA -->
+  <div id="print-area" class="hidden p-6 bg-white text-black"></div>
+
+  <!-- ========================================================= -->
+  <!-- APPLICATION LOGIC & MONGODB SECURE API CONNECTION         -->
+  <!-- ========================================================= -->
+  <script>
+    // =========================================================
+    // 1. BACKEND API CONFIGURATION (UPDATE AFTER RENDER DEPLOY)
+    // =========================================================
+    // Render/Vercel par backend deploy karne ke baad yahan apna live URL paste karein:
+    const PRODUCTION_API_URL = 'https://YOUR-PEDHI-API.onrender.com';
+    const API_BASE_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+      ? 'http://localhost:5000'
+      : PRODUCTION_API_URL;
+
+    function isStrongPassword(pwd) {
+      return typeof pwd === 'string' && pwd.length >= 8 && /[A-Za-z]/.test(pwd) && /\d/.test(pwd);
+    }
+
+    // =========================================================
+    // 2. STRICT URL TAMPERING, SILENT 2-MIN INSPECT BLOCK & OFFLINE MONITOR
+    // =========================================================
+    function sanitizeURL() {
+      try {
+        if (window.location.search || window.location.hash) {
+          window.history.replaceState(null, '', window.location.pathname);
+          if (session) showToast('URL manipulation blocked for security', 'error');
+        }
+      } catch (e) { /* Ignore sandboxed iframe errors */ }
+    }
+    sanitizeURL();
+    window.addEventListener('hashchange', sanitizeURL);
+    window.addEventListener('popstate', sanitizeURL);
+
+    // Silent 2-Minute Block State (persisted in localStorage)
+    const SILENT_BLOCK_KEY = 'gbph_blockUntil';
+    let silentBlockUntilMs = 0;
+
+    function readStoredBlockUntil() {
+      try {
+        const v = Number(localStorage.getItem(SILENT_BLOCK_KEY) || 0);
+        if (v > silentBlockUntilMs) silentBlockUntilMs = v;
+      } catch (e) { /* Fallback to in-memory */ }
+      return silentBlockUntilMs;
+    }
+
+    function writeStoredBlockUntil(ts) {
+      silentBlockUntilMs = ts;
+      try {
+        if (ts > 0) localStorage.setItem(SILENT_BLOCK_KEY, String(ts));
+        else localStorage.removeItem(SILENT_BLOCK_KEY);
+      } catch (e) { /* Ignore if storage unavailable */ }
+    }
+
+    function updateSilentBlockOverlay() {
+      const ov = document.getElementById('silent-block-overlay');
+      const timerEl = document.getElementById('silent-block-timer');
+      if (!ov || !timerEl) return;
+      const until = readStoredBlockUntil();
+      const rem = until - Date.now();
+      if (rem > 0) {
+        ov.classList.remove('hidden');
+        const totalSecs = Math.ceil(rem / 1000);
+        const dispMins = String(Math.floor(totalSecs / 60)).padStart(2, '0');
+        const secs = String(totalSecs % 60).padStart(2, '0');
+        timerEl.textContent = `${dispMins}:${secs}`;
+      } else {
+        if (until > 0) writeStoredBlockUntil(0);
+        ov.classList.add('hidden');
+      }
+    }
+
+    function triggerSilentBlock(shortcutName) {
+      const until = Date.now() + 120000; // Exact 2 minutes
+      writeStoredBlockUntil(until);
+      updateSilentBlockOverlay();
+      logAudit('Inspect Attempt Blocked', `Silent 2-min block triggered via ${shortcutName}`);
+    }
+
+    // Silently block right-click context menu
+    document.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+    });
+
+    // Detect ONLY genuine inspect/source-code shortcuts
+    document.addEventListener('keydown', (e) => {
+      const key = (e.key || '').toUpperCase();
+      const isF12 = e.key === 'F12' || e.keyCode === 123;
+      const isWinInspect = e.ctrlKey && e.shiftKey && ['I', 'J', 'C'].includes(key);
+      const isWinSource = e.ctrlKey && !e.shiftKey && !e.altKey && key === 'U';
+      const isMacInspect = e.metaKey && e.altKey && ['I', 'J', 'C', 'U'].includes(key);
+
+      if (isF12 || isWinInspect || isWinSource || isMacInspect) {
+        e.preventDefault();
+        e.stopPropagation();
+        const label = isF12 ? 'F12' : isMacInspect ? `Cmd+Option+${key}` : isWinSource ? 'Ctrl+U' : `Ctrl+Shift+${key}`;
+        triggerSilentBlock(label);
+      }
+    });
+
+    // Real-Time Offline / 404 Internet Monitor
+    function updateOnlineStatus() {
+      const ov = document.getElementById('offline-overlay');
+      if (!ov) return;
+      if (!navigator.onLine) ov.classList.remove('hidden');
+      else ov.classList.add('hidden');
+    }
+    window.addEventListener('offline', updateOnlineStatus);
+    window.addEventListener('online', () => {
+      updateOnlineStatus();
+      showToast('Internet reconnected!', 'success');
+    });
+    window.retryInternetConnection = function() {
+      const ov = document.getElementById('offline-overlay');
+      if (navigator.onLine) {
+        if (ov) ov.classList.add('hidden');
+        showToast('Connection restored!', 'success');
+      } else {
+        showToast('Still offline — Wi-Fi ya Mobile Data check karein.', 'error');
+      }
+    };
+
+    // =========================================================
+    // 3. GLOBAL STATE, SESSION TOKEN & DEFAULTS
+    // =========================================================
+    let authToken = null; // Strictly in-memory JWT token
+    let isBackendConnected = false;
+
+    let session = null; // { id, username, fullName, role, shopId, sessionVersion }
+    let activeShopId = 'pedhi1';
+    let activeView = 'dashboard';
+    let activePartyFilter = 'all';
+    let activeStatementPartyId = null;
+    let activeReportSubtab = 'pattis';
+    let pendingDeleteTarget = null; // { colName, id }
+    let currentPrintPatti = null;
+
+    let lockoutUntilMs = 0;
+    let captchaExpected = 0;
+    let lastActivityMs = Date.now();
+    let inactivityInterval = null;
+
+    const defaultConfig = {
+      features: { bardan: true, stock: true, apmcCess: true, gst: false },
+      defaults: { dalaliPercent: 2, hamaliRate: 10, tolai: 0, apmcCessPercent: 0.5 },
+      inactivityMinutes: 15,
+      crops: [
+        'Jeeru (Cumin)', 'Raydo (Mustard)', 'Eranda (Castor)', 'Kapas (Cotton)',
+        'Magfali (Groundnut)', 'Variali (Fennel)', 'Gehu (Wheat)', 'Bajri (Pearl Millet)', 'Tal (Sesame)'
+      ]
+    };
+
+    const state = {
+      config: JSON.parse(JSON.stringify(defaultConfig)),
+      shops: [],
+      users: [],
+      auditLogs: [],
+      parties: [],
+      pattis: [],
+      rojmel: [],
+      ledger: [],
+      bardan: [],
+      stock: []
+    };
+
+    const colorThemes = {
+      emerald: { sb: 'bg-emerald-950', badge: 'bg-emerald-500 text-white' },
+      amber:   { sb: 'bg-amber-950',   badge: 'bg-amber-500 text-slate-950' },
+      blue:    { sb: 'bg-blue-950',    badge: 'bg-blue-500 text-white' },
+      rose:    { sb: 'bg-rose-950',    badge: 'bg-rose-500 text-white' },
+      indigo:  { sb: 'bg-indigo-950',  badge: 'bg-indigo-500 text-white' }
+    };
+
+    // =========================================================
+    // 4. CORE UTILITIES (TIME, FORMAT, TOAST, PRIVACY, SIDEBAR)
+    // =========================================================
+    function getNowParts() {
+      const d = new Date();
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const yyyy = d.getFullYear();
+      let hrs = d.getHours();
+      const ampm = hrs >= 12 ? 'PM' : 'AM';
+      hrs = hrs % 12 || 12;
+      const hh = String(hrs).padStart(2, '0');
+      const min = String(d.getMinutes()).padStart(2, '0');
+      const sec = String(d.getSeconds()).padStart(2, '0');
+      return {
+        dateISO: `${yyyy}-${mm}-${dd}`,
+        dateIN: `${dd}/${mm}/${yyyy}`,
+        dateTimeDisplay: `${dd}/${mm}/${yyyy} ${hh}:${min}:${sec} ${ampm}`,
+        timestampMs: d.getTime()
+      };
+    }
+
+    function startLiveClock() {
+      const tick = () => {
+        const now = getNowParts();
+        const hc = document.getElementById('header-live-clock');
+        const lc = document.getElementById('login-live-clock');
+        if (hc) hc.textContent = now.dateTimeDisplay;
+        if (lc) lc.textContent = now.dateTimeDisplay;
+        document.querySelectorAll('.live-form-clock').forEach(el => {
+          el.textContent = now.dateTimeDisplay;
+        });
+        updateLockoutCountdown();
+        updateSilentBlockOverlay();
+      };
+      tick();
+      setInterval(tick, 1000);
+    }
+
+    function formatINR(num) {
+      const n = Number(num) || 0;
+      const sign = n < 0 ? '-' : '';
+      return sign + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    }
+
+    function formatDateIN(iso) {
+      if (!iso) return '-';
+      const p = String(iso).split('-');
+      return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : iso;
+    }
+
+    function escapeHTML(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function showToast(msg, type = 'success') {
+      const wrap = document.getElementById('toast-container');
+      if (!wrap) return;
+      const el = document.createElement('div');
+      const colors = type === 'error'
+        ? 'bg-rose-600 text-white'
+        : type === 'info'
+          ? 'bg-slate-800 text-white'
+          : 'bg-emerald-600 text-white';
+      el.className = `${colors} px-4 py-3 rounded-2xl shadow-xl text-xs font-bold pointer-events-auto transition`;
+      el.textContent = msg;
+      wrap.appendChild(el);
+      setTimeout(() => {
+        el.style.opacity = '0';
+        setTimeout(() => el.remove(), 250);
+      }, 3200);
+    }
+
+    window.togglePrivacyMode = function() {
+      document.body.classList.toggle('privacy-mode');
+      const isOn = document.body.classList.contains('privacy-mode');
+      const btn = document.getElementById('privacy-eye-btn');
+      if (btn) btn.classList.toggle('bg-amber-200', isOn);
+      showToast(isOn ? 'Privacy Mode ON — Amounts blurred' : 'Privacy Mode OFF', 'info');
+    };
+
+    window.toggleMobileSidebar = function(show) {
+      const sb = document.getElementById('app-sidebar');
+      const bd = document.getElementById('mobile-sidebar-backdrop');
+      if (!sb || !bd) return;
+      sb.classList.toggle('-translate-x-full', !show);
+      bd.classList.toggle('hidden', !show);
+    };
+
+    function initSidebarProximityEffect() {
+      const nav = document.getElementById('sidebar-nav');
+      if (!nav) return;
+      const getItems = () => Array.from(nav.querySelectorAll('.nav-item:not(.hidden)'));
+
+      nav.addEventListener('mousemove', (e) => {
+        const rect = nav.getBoundingClientRect();
+        nav.style.setProperty('--sidebar-glow-x', `${e.clientX - rect.left}px`);
+        nav.style.setProperty('--sidebar-glow-y', `${e.clientY - rect.top + nav.scrollTop}px`);
+        nav.classList.add('has-pointer');
+      });
+
+      nav.addEventListener('mouseleave', () => {
+        nav.classList.remove('has-pointer');
+        getItems().forEach(i => i.classList.remove('prox-hover', 'prox-neighbor'));
+      });
+
+      nav.addEventListener('mouseover', (e) => {
+        const hovered = e.target.closest('.nav-item');
+        const items = getItems();
+        items.forEach(i => i.classList.remove('prox-hover', 'prox-neighbor'));
+        if (!hovered) return;
+        const idx = items.indexOf(hovered);
+        if (idx === -1) return;
+        hovered.classList.add('prox-hover');
+        if (items[idx - 1]) items[idx - 1].classList.add('prox-neighbor');
+        if (items[idx + 1]) items[idx + 1].classList.add('prox-neighbor');
+      });
+    }
+
+    // Inactivity Auto-Logout Watcher
+    function markActivity() { lastActivityMs = Date.now(); }
+    ['mousemove', 'keydown', 'click', 'touchstart'].forEach(ev =>
+      window.addEventListener(ev, markActivity, { passive: true })
+    );
+
+    function startInactivityWatcher() {
+      stopInactivityWatcher();
+      lastActivityMs = Date.now();
+      inactivityInterval = setInterval(() => {
+        if (!session) return;
+        const limitMs = (Number(state.config.inactivityMinutes) || 15) * 60 * 1000;
+        if (Date.now() - lastActivityMs > limitMs) {
+          handleLogout('Auto-Logout due to inactivity');
+          showToast('Inactivity timeout — safety ke liye logout kar diya gaya.', 'info');
+        }
+      }, 15000);
+    }
+
+    function stopInactivityWatcher() {
+      if (inactivityInterval) clearInterval(inactivityInterval);
+      inactivityInterval = null;
+    }
+
+    function getShopById(id) {
+      return state.shops.find(s => s.id === id) || state.shops[0] || { id: 'pedhi1', name: 'Pedhi 1', address: 'APMC Market Yard', color: 'emerald' };
+    }
+
+    function shopRows(col) {
+      return (state[col] || []).filter(r => r.shopId === activeShopId);
+    }
+
+    // =========================================================
+    // 5. MONGODB BACKEND API HELPER & INITIAL SETUP
+    // =========================================================
+    async function apiRequest(path, options = {}) {
+      const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+      if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+      const res = await fetch(`${API_BASE_URL}${path}`, {
+        method: options.method || 'GET',
+        headers,
+        body: options.body !== undefined ? JSON.stringify(options.body) : undefined
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401 && session && (data.code === 'SESSION_INVALIDATED' || data.code === 'TOKEN_INVALID')) {
+        handleLogout('Session invalidated by server');
+        showToast(data.error || 'Aapki ID/Password update hui ya account disable kiya gaya. Dobara login karein.', 'error');
+        throw new Error(data.error || 'Session invalidated');
+      }
+      if (!res.ok) {
+        const err = new Error(data.error || `Request failed (${res.status})`);
+        err.status = res.status;
+        err.data = data;
+        throw err;
+      }
+      return data;
+    }
+
+    async function checkBackendStatus() {
+      const statusPill = document.getElementById('login-cloud-status');
+      const loginCard = document.getElementById('login-card');
+      const setupCard = document.getElementById('setup-card');
+      try {
+        const res = await apiRequest('/api/auth/status');
+        isBackendConnected = true;
+        if (statusPill) {
+          statusPill.textContent = 'MongoDB Connected';
+          statusPill.className = 'px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200';
+        }
+        if (loginCard && setupCard) {
+          loginCard.classList.toggle('hidden', !!res.needsSetup);
+          setupCard.classList.toggle('hidden', !res.needsSetup);
+        }
+      } catch (err) {
+        isBackendConnected = false;
+        if (statusPill) {
+          statusPill.textContent = 'API Not Connected';
+          statusPill.className = 'px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200';
+        }
+        console.warn('MongoDB Backend not reachable at', API_BASE_URL);
+      }
+    }
+
+    window.handleInitialSetup = async function(e) {
+      e.preventDefault();
+      const errBox = document.getElementById('setup-error-box');
+      errBox.classList.add('hidden');
+
+      const username = document.getElementById('setup-admin-uid').value.trim();
+      const password = document.getElementById('setup-admin-pass').value;
+      const pin = document.getElementById('setup-admin-pin').value.trim();
+      const shop1Name = document.getElementById('setup-shop1-name').value.trim();
+      const shop2Name = document.getElementById('setup-shop2-name').value.trim();
+
+      if (username.length < 4) {
+        errBox.textContent = 'Admin User ID kam se kam 4 characters ka hona chahiye.';
+        errBox.classList.remove('hidden');
+        return;
+      }
+      if (!isStrongPassword(password)) {
+        errBox.textContent = 'Password kam se kam 8 characters ka hona chahiye aur usme letters + numbers dono hone chahiye.';
+        errBox.classList.remove('hidden');
+        return;
+      }
+      if (!/^\d{6}$/.test(pin)) {
+        errBox.textContent = 'Delete Security PIN exact 6 digits ka hona chahiye.';
+        errBox.classList.remove('hidden');
+        return;
+      }
+
+      try {
+        await apiRequest('/api/auth/setup', {
+          method: 'POST',
+          body: { username, password, pin, shop1Name, shop2Name }
+        });
+        document.getElementById('initial-setup-form').reset();
+        document.getElementById('setup-card').classList.add('hidden');
+        document.getElementById('login-card').classList.remove('hidden');
+        document.getElementById('login-userid').value = username;
+        showToast('Master Admin setup complete! Ab login karein.');
+      } catch (err) {
+        errBox.textContent = err.message || 'Setup failed — backend connection check karein.';
+        errBox.classList.remove('hidden');
+      }
+    };
+
+    async function fetchBootstrapData() {
+      if (!authToken || !session) return;
+      const data = await apiRequest('/api/bootstrap');
+      state.config = {
+        features: { ...defaultConfig.features, ...(data.config?.features || {}) },
+        defaults: { ...defaultConfig.defaults, ...(data.config?.defaults || {}) },
+        inactivityMinutes: Number(data.config?.inactivityMinutes) || 15,
+        crops: Array.isArray(data.config?.crops) && data.config.crops.length > 0 ? data.config.crops : defaultConfig.crops
+      };
+      state.shops = Array.isArray(data.shops) ? data.shops : [];
+      state.users = Array.isArray(data.users) ? data.users : [];
+      state.auditLogs = Array.isArray(data.auditLogs) ? data.auditLogs : [];
+      state.parties = Array.isArray(data.parties) ? data.parties : [];
+      state.pattis = Array.isArray(data.pattis) ? data.pattis : [];
+      state.rojmel = Array.isArray(data.rojmel) ? data.rojmel : [];
+      state.ledger = Array.isArray(data.ledger) ? data.ledger : [];
+      state.bardan = Array.isArray(data.bardan) ? data.bardan : [];
+      state.stock = Array.isArray(data.stock) ? data.stock : [];
+    }
+
+    window.refreshAllData = async function() {
+      if (!session) return;
+      const icon = document.getElementById('refresh-btn-icon');
+      const btn = document.getElementById('refresh-data-btn');
+      if (icon) icon.classList.add('animate-spin');
+      if (btn) btn.disabled = true;
+
+      try {
+        await fetchBootstrapData();
+        renderAll();
+        if (activeStatementPartyId && !document.getElementById('modal-statement').classList.contains('hidden')) {
+          renderPartyStatement(activeStatementPartyId);
+        }
+        const timeOnly = getNowParts().dateTimeDisplay.split(' ').slice(1).join(' ');
+        showToast(`MongoDB data refreshed at ${timeOnly}`, 'success');
+      } catch (err) {
+        console.error('Refresh error:', err);
+        showToast('Refresh failed — backend/internet check karein.', 'error');
+      } finally {
+        setTimeout(() => {
+          if (icon) icon.classList.remove('animate-spin');
+          if (btn) btn.disabled = false;
+        }, 450);
+      }
+    };
+
+    async function logAudit(action, details) {
+      if (!authToken || !session) return;
+      try {
+        await apiRequest('/api/audit', {
+          method: 'POST',
+          body: {
+            action,
+            details,
+            shopName: session.role === 'admin' ? 'Master Admin' : (getShopById(activeShopId)?.name || activeShopId)
+          }
+        });
+      } catch (e) { /* Ignore silent audit errors */ }
+    }
+
+    async function dbAdd(colName, data) {
+      const now = getNowParts();
+      const enforcedShopId = session.role === 'admin' ? activeShopId : session.shopId;
+      const payload = {
+        ...data,
+        shopId: data.shopId || enforcedShopId,
+        entryDateTime: now.dateTimeDisplay,
+        timestampMs: now.timestampMs
+      };
+      const res = await apiRequest(`/api/data/${colName}`, { method: 'POST', body: payload });
+      if (res.item) {
+        state[colName].push(res.item);
+        renderAll();
+        return res.item.id;
+      }
+      return '';
+    }
+
+    async function dbDelete(colName, id, pin) {
+      await apiRequest(`/api/data/${colName}/${id}`, {
+        method: 'DELETE',
+        body: { pin }
+      });
+      state[colName] = state[colName].filter(i => i.id !== id);
+      renderAll();
+    }
+
+    async function saveConfigToCloud() {
+      await apiRequest('/api/admin/config', { method: 'PUT', body: state.config });
+      renderAll();
+    }
+
+    // =========================================================
+    // 6. MATH CAPTCHA, LOCKOUT & LOGIN / LOGOUT
+    // =========================================================
+    window.refreshCaptcha = function() {
+      const a = Math.floor(Math.random() * 12) + 2;
+      const b = Math.floor(Math.random() * 10) + 1;
+      captchaExpected = a + b;
+      const qEl = document.getElementById('captcha-question');
+      const aEl = document.getElementById('captcha-answer');
+      if (qEl) qEl.textContent = `${a} + ${b} = ?`;
+      if (aEl) aEl.value = '';
+    };
+
+    function updateLockoutCountdown() {
+      const banner = document.getElementById('lockout-banner');
+      const btn = document.getElementById('login-submit-btn');
+      if (!banner || !btn) return;
+      const rem = lockoutUntilMs - Date.now();
+      if (rem > 0) {
+        banner.classList.remove('hidden');
+        btn.disabled = true;
+        const mins = String(Math.floor(rem / 60000)).padStart(2, '0');
+        const secs = String(Math.floor((rem % 60000) / 1000)).padStart(2, '0');
+        document.getElementById('lockout-timer').textContent = `${mins}:${secs}`;
+      } else if (lockoutUntilMs > 0) {
+        lockoutUntilMs = 0;
+        banner.classList.add('hidden');
+        btn.disabled = false;
+      }
+    }
+
+    window.toggleLoginPassword = function() {
+      const inp = document.getElementById('login-password');
+      const btn = document.getElementById('toggle-pwd-btn');
+      inp.type = inp.type === 'password' ? 'text' : 'password';
+      btn.textContent = inp.type === 'password' ? 'Show' : 'Hide';
+    };
+
+    window.handleLogin = async function(e) {
+      e.preventDefault();
+      sanitizeURL();
+      if (Date.now() < lockoutUntilMs) return;
+
+      const uid = document.getElementById('login-userid').value.trim();
+      const pwd = document.getElementById('login-password').value;
+      const capAns = Number(document.getElementById('captcha-answer').value);
+      const errBox = document.getElementById('login-error-box');
+      errBox.classList.add('hidden');
+
+      if (capAns !== captchaExpected) {
+        errBox.textContent = 'Galat Security Verification (Captcha)! Dobara solve karein.';
+        errBox.classList.remove('hidden');
+        refreshCaptcha();
+        return;
+      }
+
+      const btn = document.getElementById('login-submit-btn');
+      btn.disabled = true;
+      btn.textContent = 'Verifying...';
+
+      try {
+        const res = await apiRequest('/api/auth/login', {
+          method: 'POST',
+          body: { username: uid, password: pwd }
+        });
+
+        authToken = res.token;
+        session = res.user;
+        lockoutUntilMs = 0;
+
+        await fetchBootstrapData();
+
+        const isAdmin = session.role === 'admin';
+        activeShopId = isAdmin ? (state.shops[0]?.id || 'pedhi1') : session.shopId;
+
+        document.getElementById('login-screen').classList.add('hidden');
+        document.getElementById('app-shell').classList.remove('hidden');
+        document.getElementById('login-form').reset();
+        refreshCaptcha();
+
+        document.getElementById('sidebar-admin-section').classList.toggle('hidden', !isAdmin);
+        document.getElementById('admin-shop-inspector').classList.toggle('hidden', !isAdmin);
+
+        startInactivityWatcher();
+        initDateInputs();
+        applyDefaultRatesToPattiForm();
+        renderAll();
+        navigate(isAdmin ? 'admin-dashboard' : 'dashboard');
+        showToast(`Welcome, ${session.fullName}!`);
+      } catch (err) {
+        refreshCaptcha();
+        if (err.data && err.data.lockoutUntilMs) {
+          lockoutUntilMs = Number(err.data.lockoutUntilMs);
+          updateLockoutCountdown();
+        }
+        errBox.textContent = err.message || 'Backend API se connect nahi ho paya — PRODUCTION_API_URL check karein.';
+        errBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = Date.now() < lockoutUntilMs;
+        btn.textContent = 'Verify & Login →';
+      }
+    };
+
+    window.handleLogout = function(reason = 'Manual Logout') {
+      if (session && authToken) {
+        logAudit('Logout', reason);
+      }
+      authToken = null;
+      session = null;
+      activeStatementPartyId = null;
+      state.parties = [];
+      state.pattis = [];
+      state.rojmel = [];
+      state.ledger = [];
+      state.bardan = [];
+      state.stock = [];
+      state.users = [];
+      state.auditLogs = [];
+      stopInactivityWatcher();
+      closeAllModals();
+      document.getElementById('app-shell').classList.add('hidden');
+      document.getElementById('login-screen').classList.remove('hidden');
+      refreshCaptcha();
+      sanitizeURL();
+      if (reason === 'Manual Logout') showToast('Logged out safely', 'info');
+    };
+
+    // =========================================================
+    // 7. NAVIGATION & SHOP THEME SWITCHER
+    // =========================================================
+    const viewTitles = {
+      'dashboard': 'Dashboard (Total Hisab)',
+      'rojmel-list': 'Rojmel Register (Cash Book)',
+      'khatavahi': 'Khatavahi (Party Ledger)',
+      'reports': 'Patti, Bardan & Stock Reports',
+      'add-patti': '+ Add Khedut Patti (Haraji Bill)',
+      'add-rojmel': '+ Add Rojmel Entry',
+      'add-bardan-stock': '+ Add Bardan & Godown Stock',
+      'add-party': '+ Add Khedut / Vyapari',
+      'admin-dashboard': 'Master Admin — All Shops Combined',
+      'admin-users': 'Master Admin — Users & Shops Control',
+      'admin-features': 'Master Admin — Features & Upgrades',
+      'admin-audit': 'Master Admin — Security Audit Log',
+      'admin-backup': 'Master Admin — Long-Term Backup'
+    };
+
+    window.navigate = function(view) {
+      if (view.startsWith('admin-') && session?.role !== 'admin') return;
+      activeView = view;
+      document.querySelectorAll('.app-view').forEach(sec => {
+        sec.classList.toggle('hidden', sec.id !== `view-${view}`);
+      });
+      document.querySelectorAll('.nav-item').forEach(btn => {
+        const isActive = btn.dataset.view === view;
+        btn.classList.toggle('bg-white/15', isActive);
+        btn.classList.toggle('text-white', isActive);
+      });
+      const titleEl = document.getElementById('topbar-title');
+      if (titleEl) titleEl.textContent = viewTitles[view] || 'Ganj Bazar Pedhi Hisab';
+      toggleMobileSidebar(false);
+      if (view === 'add-patti') recalcPatti();
+      renderAll();
+    };
+
+    window.switchActiveShop = function(newShopId) {
+      if (session?.role !== 'admin') return;
+      activeShopId = newShopId;
+      renderAll();
+      showToast(`Viewing: ${getShopById(activeShopId).name}`, 'info');
+    };
+
+    function applyShopTheme() {
+      const shop = getShopById(activeShopId);
+      const theme = colorThemes[shop.color] || colorThemes.emerald;
+      const sb = document.getElementById('app-sidebar');
+      const badge = document.getElementById('sidebar-shop-badge');
+      if (sb) {
+        Object.values(colorThemes).forEach(t => sb.classList.remove(t.sb));
+        sb.classList.add(theme.sb);
+      }
+      if (badge) {
+        badge.className = `inline-block px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase ${theme.badge}`;
+        badge.textContent = session?.role === 'admin' ? 'Admin Inspect' : 'Active Pedhi';
+      }
+      const nameEl = document.getElementById('sidebar-shop-name');
+      const userEl = document.getElementById('sidebar-user-label');
+      const addrEl = document.getElementById('topbar-shop-address');
+      if (nameEl) nameEl.textContent = shop.name;
+      if (userEl && session) userEl.textContent = `${session.fullName} (@${session.username})`;
+      if (addrEl) addrEl.textContent = `${shop.name} • ${shop.address || 'APMC Market Yard'}`;
+
+      // Update Admin shop switcher options
+      const sw = document.getElementById('admin-shop-switcher');
+      if (sw && session?.role === 'admin') {
+        sw.innerHTML = state.shops.map(s =>
+          `<option value="${escapeHTML(s.id)}" ${s.id === activeShopId ? 'selected' : ''}>${escapeHTML(s.name)}</option>`
+        ).join('');
+      }
+    }
+
+    // =========================================================
+    // 8. CALCULATIONS & RENDERERS
+    // =========================================================
+    function computeShopMetrics(shopId) {
+      const todayISO = getNowParts().dateISO;
+      const roj = state.rojmel.filter(r => r.shopId === shopId);
+      const pat = state.pattis.filter(r => r.shopId === shopId);
+      const led = state.ledger.filter(r => r.shopId === shopId);
+      const bar = state.bardan.filter(r => r.shopId === shopId);
+      const stk = state.stock.filter(r => r.shopId === shopId);
+      const par = state.parties.filter(r => r.shopId === shopId);
+
+      let todayJama = 0, todayUdhar = 0, totalJama = 0, totalUdhar = 0;
+      roj.forEach(r => {
+        const amt = Number(r.amount) || 0;
+        if (r.type === 'jama') {
+          totalJama += amt;
+          if (r.date === todayISO) todayJama += amt;
+        } else {
+          totalUdhar += amt;
+          if (r.date === todayISO) todayUdhar += amt;
+        }
+      });
+
+      const pattiTotal = pat.reduce((s, p) => s + (Number(p.netPayable) || 0), 0);
+
+      let vyapariBaki = 0, khedutBaki = 0;
+      par.forEach(p => {
+        const pLed = led.filter(l => l.partyId === p.id);
+        const jama = pLed.filter(l => l.type === 'jama').reduce((s, l) => s + (Number(l.amount) || 0), 0);
+        const udhar = pLed.filter(l => l.type === 'udhar').reduce((s, l) => s + (Number(l.amount) || 0), 0);
+        if (p.type === 'vyapari' && udhar > jama) vyapariBaki += (udhar - jama);
+        if (p.type === 'khedut' && jama > udhar) khedutBaki += (jama - udhar);
+      });
+
+      let pendingBardan = 0;
+      bar.forEach(b => {
+        const q = Number(b.qty) || 0;
+        pendingBardan += b.type === 'issued' ? q : -q;
+      });
+
+      let stockKg = 0, stockBags = 0;
+      stk.forEach(s => {
+        const sign = s.type === 'in' ? 1 : -1;
+        stockKg += sign * (Number(s.kg) || 0);
+        stockBags += sign * (Number(s.bags) || 0);
+      });
+
+      return {
+        todayJama, todayUdhar,
+        netCash: totalJama - totalUdhar,
+        pattiTotal, pattiCount: pat.length,
+        vyapariBaki, khedutBaki,
+        pendingBardan,
+        stockKg, stockMan: stockKg / 20, stockBags
+      };
+    }
+
+    function renderAll() {
+      if (!session) return;
+      applyShopTheme();
+      populateDropdowns();
+      applyFeatureVisibility();
+      renderDashboard();
+      renderRojmelList();
+      renderKhatavahi();
+      renderReports();
+      if (session.role === 'admin') {
+        renderAdminDashboard();
+        renderAdminUsersAndShops();
+        renderAdminFeatures();
+        renderAdminAudit();
+      }
+    }
+
+    function applyFeatureVisibility() {
+      const f = state.config.features || defaultConfig.features;
+      document.getElementById('patti-cess-wrap')?.classList.toggle('hidden', !f.apmcCess);
+      document.getElementById('patti-gst-wrap')?.classList.toggle('hidden', !f.gst);
+      document.getElementById('nav-add-bardan-stock')?.classList.toggle('hidden', !f.bardan && !f.stock);
+    }
+
+    function populateDropdowns() {
+      const parties = shopRows('parties');
+      const farmers = parties.filter(p => p.type === 'khedut');
+      const buyers = parties.filter(p => p.type === 'vyapari');
+
+      const fillSel = (id, list, placeholder) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const prev = el.value;
+        el.innerHTML = `<option value="">${placeholder}</option>` +
+          list.map(p => `<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}${p.village ? ' (' + escapeHTML(p.village) + ')' : ''}</option>`).join('');
+        if (prev) el.value = prev;
+      };
+
+      fillSel('patti-farmer', farmers.length ? farmers : parties, '-- Select Khedut --');
+      fillSel('patti-buyer', buyers.length ? buyers : parties, '-- Optional Vyapari --');
+      fillSel('rojmel-party', parties, '-- Direct / No Party --');
+      fillSel('bardan-party', parties, '-- Select Party --');
+
+      const crops = state.config.crops || defaultConfig.crops;
+      ['patti-crop', 'stock-crop'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const prev = el.value;
+        el.innerHTML = crops.map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('');
+        if (prev && crops.includes(prev)) el.value = prev;
+      });
+    }
+
+    function renderDashboard() {
+      const m = computeShopMetrics(activeShopId);
+      document.getElementById('kpi-today-jama').textContent = formatINR(m.todayJama);
+      document.getElementById('kpi-today-udhar').textContent = formatINR(m.todayUdhar);
+      document.getElementById('kpi-net-cash').textContent = formatINR(m.netCash);
+      document.getElementById('kpi-patti-total').textContent = formatINR(m.pattiTotal);
+      document.getElementById('kpi-patti-count').textContent = `${m.pattiCount} Pattis Saved`;
+      document.getElementById('kpi-vyapari-baki').textContent = formatINR(m.vyapariBaki);
+      document.getElementById('kpi-khedut-baki').textContent = formatINR(m.khedutBaki);
+      document.getElementById('kpi-pending-bardan').textContent = `${m.pendingBardan} Bori`;
+      document.getElementById('kpi-stock-balance').textContent = `${m.stockMan.toFixed(2)} Man`;
+      document.getElementById('kpi-stock-sub').textContent = `${m.stockKg.toFixed(1)} Kg • ${m.stockBags} Bori`;
+
+      const recent = [
+        ...shopRows('rojmel').map(r => ({
+          ts: r.timestampMs || 0,
+          dt: r.entryDateTime || formatDateIN(r.date),
+          badge: r.type === 'jama' ? '🟢 Jama' : '🔴 Udhar',
+          detail: `${r.partyName ? r.partyName + ' — ' : ''}${r.note || ''}`,
+          amt: formatINR(r.amount),
+          cls: r.type === 'jama' ? 'text-emerald-700' : 'text-rose-700'
+        })),
+        ...shopRows('pattis').map(p => ({
+          ts: p.timestampMs || 0,
+          dt: p.entryDateTime || formatDateIN(p.date),
+          badge: '🧾 Patti',
+          detail: `${p.farmerName} — ${p.crop} (${p.man} Man)`,
+          amt: formatINR(p.netPayable),
+          cls: 'text-amber-700'
+        }))
+      ].sort((a, b) => b.ts - a.ts).slice(0, 8);
+
+      const tb = document.getElementById('dashboard-recent-tbody');
+      if (!tb) return;
+      tb.innerHTML = recent.length === 0
+        ? `<tr><td colspan="4" class="px-4 py-8 text-center text-slate-400">Abhi koi entry nahi hai. Sidebar se nayi entry add karein.</td></tr>`
+        : recent.map(r => `
+          <tr class="hover:bg-slate-50">
+            <td class="px-4 py-2.5 font-mono text-[11px] text-slate-500">${escapeHTML(r.dt)}</td>
+            <td class="px-4 py-2.5 font-bold">${r.badge}</td>
+            <td class="px-4 py-2.5 font-medium text-slate-800">${escapeHTML(r.detail)}</td>
+            <td class="px-4 py-2.5 text-right font-extrabold ${r.cls} amt-sensitive">${r.amt}</td>
+          </tr>`).join('');
+    }
+
+    window.renderRojmelList = function() {
+      const q = (document.getElementById('rojmel-search')?.value || '').toLowerCase();
+      const rows = shopRows('rojmel')
+        .filter(r => !q || `${r.partyName || ''} ${r.note || ''} ${r.entryDateTime || ''} ${r.date || ''}`.toLowerCase().includes(q))
+        .sort((a, b) => (b.timestampMs || 0) - (a.timestampMs || 0));
+
+      const tb = document.getElementById('rojmel-tbody');
+      if (!tb) return;
+      tb.innerHTML = rows.length === 0
+        ? `<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">Koi Rojmel entry nahi mili.</td></tr>`
+        : rows.map(r => `
+          <tr class="hover:bg-slate-50">
+            <td class="px-4 py-2.5 font-mono text-[11px] text-slate-500">${escapeHTML(r.entryDateTime || formatDateIN(r.date))}</td>
+            <td class="px-4 py-2.5 font-extrabold ${r.type === 'jama' ? 'text-emerald-700' : 'text-rose-700'}">${r.type === 'jama' ? '🟢 Jama' : '🔴 Udhar'}</td>
+            <td class="px-4 py-2.5"><div class="font-bold text-slate-800">${escapeHTML(r.partyName || 'Direct')}</div><div class="text-[11px] text-slate-500">${escapeHTML(r.note || '')}</div></td>
+            <td class="px-4 py-2.5 text-slate-600">${escapeHTML(r.mode || 'Cash')}</td>
+            <td class="px-4 py-2.5 text-right font-black amt-sensitive ${r.type === 'jama' ? 'text-emerald-700' : 'text-rose-700'}">${formatINR(r.amount)}</td>
+            <td class="px-4 py-2.5 text-right">
+              <button type="button" onclick="confirmDeleteWithPin('rojmel','${escapeHTML(r.id)}')" class="text-rose-600 hover:underline font-bold">Delete</button>
+            </td>
+          </tr>`).join('');
+    };
+
+    window.setPartyFilter = function(f) {
+      activePartyFilter = f;
+      ['all', 'khedut', 'vyapari'].forEach(k => {
+        const btn = document.getElementById(`pf-${k}`);
+        if (!btn) return;
+        btn.className = k === f
+          ? 'px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-white'
+          : 'px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-700';
+      });
+      renderKhatavahi();
+    };
+
+    window.renderKhatavahi = function() {
+      const q = (document.getElementById('party-search')?.value || '').toLowerCase();
+      const parties = shopRows('parties').filter(p =>
+        (activePartyFilter === 'all' || p.type === activePartyFilter) &&
+        (!q || `${p.name} ${p.village || ''} ${p.phone || ''}`.toLowerCase().includes(q))
+      );
+      const led = shopRows('ledger');
+      const grid = document.getElementById('khatavahi-grid');
+      if (!grid) return;
+
+      grid.innerHTML = parties.length === 0
+        ? `<div class="col-span-full bg-white rounded-2xl border border-slate-200 p-8 text-center text-xs text-slate-400">Koi party nahi mili. "+ Add Party" se naya khata banayein.</div>`
+        : parties.map(p => {
+          const pl = led.filter(l => l.partyId === p.id);
+          const jama = pl.filter(l => l.type === 'jama').reduce((s, l) => s + (Number(l.amount) || 0), 0);
+          const udhar = pl.filter(l => l.type === 'udhar').reduce((s, l) => s + (Number(l.amount) || 0), 0);
+          const bal = jama - udhar;
+          const balLabel = bal > 0 ? `Dena Baki: ${formatINR(bal)}` : bal < 0 ? `Lena Baki: ${formatINR(Math.abs(bal))}` : 'Settled (₹0)';
+          const balCls = bal > 0 ? 'text-orange-600' : bal < 0 ? 'text-blue-700' : 'text-emerald-700';
+          return `
+            <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs flex flex-col justify-between gap-3">
+              <div>
+                <div class="flex items-center justify-between gap-2">
+                  <span class="px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase ${p.type === 'khedut' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">
+                    ${p.type === 'khedut' ? '🧑‍🌾 Khedut' : '🏪 Vyapari'}
+                  </span>
+                  <span class="text-[11px] text-slate-400">${escapeHTML(p.phone || '')}</span>
+                </div>
+                <h4 class="font-black text-slate-900 text-sm mt-2">${escapeHTML(p.name)}</h4>
+                <p class="text-[11px] text-slate-500">${escapeHTML(p.village || 'APMC Market Yard')}</p>
+              </div>
+              <div class="pt-3 border-t border-slate-100 flex items-center justify-between">
+                <div class="text-xs font-extrabold ${balCls} amt-sensitive">${balLabel}</div>
+                <button type="button" onclick="openPartyStatement('${escapeHTML(p.id)}')" class="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-[11px] font-bold">Statement →</button>
+              </div>
+            </div>`;
+        }).join('');
+    };
+
+    window.switchReportSubtab = function(tab) {
+      activeReportSubtab = tab;
+      ['pattis', 'bardan', 'stock'].forEach(t => {
+        const b = document.getElementById(`rtab-${t}`);
+        if (!b) return;
+        b.className = t === tab
+          ? 'px-3.5 py-2 rounded-xl text-xs font-extrabold bg-emerald-600 text-white'
+          : 'px-3.5 py-2 rounded-xl text-xs font-extrabold bg-slate-100 text-slate-700';
+      });
+      renderReports();
+    };
+
+    function renderReports() {
+      const wrap = document.getElementById('report-table-wrap');
+      if (!wrap) return;
+
+      if (activeReportSubtab === 'pattis') {
+        const rows = shopRows('pattis').sort((a, b) => (b.timestampMs || 0) - (a.timestampMs || 0));
+        wrap.innerHTML = `<table class="w-full text-left text-xs">
+          <thead class="bg-slate-50 text-slate-500 uppercase text-[10px]">
+            <tr><th class="px-4 py-3">Date & Time</th><th class="px-4 py-3">Khedut</th><th class="px-4 py-3">Fasal / Weight</th><th class="px-4 py-3">Status</th><th class="px-4 py-3 text-right">Net Payable</th><th class="px-4 py-3 text-right">Action</th></tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">${rows.length === 0 ? `<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">No Khedut Pattis yet.</td></tr>` : rows.map(p => `
+            <tr class="hover:bg-slate-50">
+              <td class="px-4 py-2.5 font-mono text-[11px] text-slate-500">${escapeHTML(p.entryDateTime || formatDateIN(p.date))}</td>
+              <td class="px-4 py-2.5 font-bold">${escapeHTML(p.farmerName)}</td>
+              <td class="px-4 py-2.5">${escapeHTML(p.crop)} • ${p.bags || 0} Bori (${p.man} Man)</td>
+              <td class="px-4 py-2.5"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${p.paymentStatus === 'paid' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">${p.paymentStatus === 'paid' ? 'Rokad Paid' : 'Baki'}</span></td>
+              <td class="px-4 py-2.5 text-right font-black text-emerald-800 amt-sensitive">${formatINR(p.netPayable)}</td>
+              <td class="px-4 py-2.5 text-right space-x-2">
+                <button type="button" onclick="openPattiReceipt('${escapeHTML(p.id)}')" class="text-blue-600 font-bold hover:underline">Print</button>
+                <button type="button" onclick="confirmDeleteWithPin('pattis','${escapeHTML(p.id)}')" class="text-rose-600 font-bold hover:underline">Del</button>
+              </td>
+            </tr>`).join('')}</tbody></table>`;
+      } else if (activeReportSubtab === 'bardan') {
+        const rows = shopRows('bardan').sort((a, b) => (b.timestampMs || 0) - (a.timestampMs || 0));
+        wrap.innerHTML = `<table class="w-full text-left text-xs">
+          <thead class="bg-slate-50 text-slate-500 uppercase text-[10px]">
+            <tr><th class="px-4 py-3">Date & Time</th><th class="px-4 py-3">Party</th><th class="px-4 py-3">Type</th><th class="px-4 py-3 text-right">Bori Qty</th><th class="px-4 py-3">Note</th><th class="px-4 py-3 text-right">Del</th></tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">${rows.length === 0 ? `<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">No Bardan entries yet.</td></tr>` : rows.map(b => `
+            <tr class="hover:bg-slate-50">
+              <td class="px-4 py-2.5 font-mono text-[11px] text-slate-500">${escapeHTML(b.entryDateTime || formatDateIN(b.date))}</td>
+              <td class="px-4 py-2.5 font-bold">${escapeHTML(b.partyName)}</td>
+              <td class="px-4 py-2.5 font-bold ${b.type === 'issued' ? 'text-amber-700' : 'text-emerald-700'}">${b.type === 'issued' ? '📤 Issued' : '📥 Returned'}</td>
+              <td class="px-4 py-2.5 text-right font-black">${b.qty}</td>
+              <td class="px-4 py-2.5 text-slate-500">${escapeHTML(b.note || '')}</td>
+              <td class="px-4 py-2.5 text-right"><button type="button" onclick="confirmDeleteWithPin('bardan','${escapeHTML(b.id)}')" class="text-rose-600 font-bold hover:underline">Del</button></td>
+            </tr>`).join('')}</tbody></table>`;
+      } else {
+        const rows = shopRows('stock').sort((a, b) => (b.timestampMs || 0) - (a.timestampMs || 0));
+        wrap.innerHTML = `<table class="w-full text-left text-xs">
+          <thead class="bg-slate-50 text-slate-500 uppercase text-[10px]">
+            <tr><th class="px-4 py-3">Date & Time</th><th class="px-4 py-3">Fasal</th><th class="px-4 py-3">Type</th><th class="px-4 py-3 text-right">Weight (Man / Kg)</th><th class="px-4 py-3 text-right">Value (₹)</th><th class="px-4 py-3 text-right">Del</th></tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">${rows.length === 0 ? `<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">No Godown Stock entries yet.</td></tr>` : rows.map(s => `
+            <tr class="hover:bg-slate-50">
+              <td class="px-4 py-2.5 font-mono text-[11px] text-slate-500">${escapeHTML(s.entryDateTime || formatDateIN(s.date))}</td>
+              <td class="px-4 py-2.5 font-bold">${escapeHTML(s.crop)} (${s.bags || 0} Bori)</td>
+              <td class="px-4 py-2.5 font-bold ${s.type === 'in' ? 'text-emerald-700' : 'text-rose-700'}">${s.type === 'in' ? '📥 In' : '📤 Out'}</td>
+              <td class="px-4 py-2.5 text-right font-bold">${((Number(s.kg) || 0) / 20).toFixed(2)} Man (${s.kg} Kg)</td>
+              <td class="px-4 py-2.5 text-right font-extrabold amt-sensitive">${formatINR(s.amount || 0)}</td>
+              <td class="px-4 py-2.5 text-right"><button type="button" onclick="confirmDeleteWithPin('stock','${escapeHTML(s.id)}')" class="text-rose-600 font-bold hover:underline">Del</button></td>
+            </tr>`).join('')}</tbody></table>`;
+      }
+    }
+
+    // =========================================================
+    // 9. FORM HANDLERS (PATTI, ROJMEL, BARDAN, STOCK, PARTY)
+    // =========================================================
+    function applyDefaultRatesToPattiForm() {
+      const d = state.config.defaults || defaultConfig.defaults;
+      const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+      setVal('patti-dalali-pct', d.dalaliPercent ?? 2);
+      setVal('patti-hamali-rate', d.hamaliRate ?? 10);
+      setVal('patti-tolai', d.tolai ?? 0);
+      setVal('patti-cess-pct', d.apmcCessPercent ?? 0.5);
+      recalcPatti();
+    }
+
+    window.recalcPatti = function() {
+      const bags = Number(document.getElementById('patti-bags')?.value) || 0;
+      const kg = Number(document.getElementById('patti-kg')?.value) || 0;
+      const rate = Number(document.getElementById('patti-rate')?.value) || 0;
+      const hamaliRate = Number(document.getElementById('patti-hamali-rate')?.value) || 0;
+      const tolai = Number(document.getElementById('patti-tolai')?.value) || 0;
+      const dalaliPct = Number(document.getElementById('patti-dalali-pct')?.value) || 0;
+      const cessPct = state.config.features?.apmcCess ? (Number(document.getElementById('patti-cess-pct')?.value) || 0) : 0;
+      const gstPct = state.config.features?.gst ? (Number(document.getElementById('patti-gst-pct')?.value) || 0) : 0;
+      const bardan = Number(document.getElementById('patti-bardan')?.value) || 0;
+      const upad = Number(document.getElementById('patti-upad')?.value) || 0;
+
+      const man = kg / 20;
+      const gross = man * rate;
+      const hamali = bags * hamaliRate;
+      const dalali = gross * (dalaliPct / 100);
+      const cess = gross * (cessPct / 100);
+      const gst = gross * (gstPct / 100);
+      const deductions = hamali + tolai + dalali + cess + gst + bardan + upad;
+      const net = Math.max(0, gross - deductions);
+
+      document.getElementById('calc-man').textContent = `${man.toFixed(2)} Man`;
+      document.getElementById('calc-gross').textContent = formatINR(gross);
+      document.getElementById('calc-deductions').textContent = `- ${formatINR(deductions)}`;
+      document.getElementById('calc-net').textContent = formatINR(net);
+
+      return { bags, kg, man: Number(man.toFixed(2)), rate, gross, hamali, tolai, dalali, cess, gst, bardan, upad, deductions, net };
+    };
+
+    window.savePatti = async function(e) {
+      e.preventDefault();
+      const farmerId = document.getElementById('patti-farmer').value;
+      const farmer = state.parties.find(p => p.id === farmerId);
+      if (!farmer) return showToast('Pehle "+ Add Party" se Khedut add karein!', 'error');
+
+      const buyerId = document.getElementById('patti-buyer').value;
+      const buyer = state.parties.find(p => p.id === buyerId);
+      const crop = document.getElementById('patti-crop').value;
+      const date = document.getElementById('patti-date').value;
+      const payMode = document.querySelector('input[name="patti-pay-mode"]:checked')?.value || 'paid';
+      const c = recalcPatti();
+
+      try {
+        const pattiId = await dbAdd('pattis', {
+          date,
+          farmerId: farmer.id,
+          farmerName: farmer.name,
+          buyerId: buyer?.id || '',
+          buyerName: buyer?.name || '',
+          crop,
+          bags: c.bags,
+          kg: c.kg,
+          man: c.man,
+          rate: c.rate,
+          grossAmount: c.gross,
+          hamali: c.hamali,
+          tolai: c.tolai,
+          dalali: c.dalali,
+          cess: c.cess,
+          gst: c.gst,
+          bardan: c.bardan,
+          upad: c.upad,
+          totalDeductions: c.deductions,
+          netPayable: c.net,
+          paymentStatus: payMode
+        });
+
+        // Auto-post to Rojmel (if Rokad Paid) OR Khatavahi Ledger (if Baki)
+        if (payMode === 'paid') {
+          await dbAdd('rojmel', {
+            date,
+            type: 'udhar',
+            partyId: farmer.id,
+            partyName: farmer.name,
+            mode: 'Cash',
+            amount: c.net,
+            note: `Khedut Patti Paid — ${crop} (${c.man} Man)`
+          });
+        } else {
+          await dbAdd('ledger', {
+            date,
+            partyId: farmer.id,
+            type: 'jama',
+            amount: c.net,
+            note: `Khedut Patti Baki — ${crop} (${c.man} Man)`
+          });
+        }
+
+        if (buyer) {
+          await dbAdd('ledger', {
+            date,
+            partyId: buyer.id,
+            type: 'udhar',
+            amount: c.gross,
+            note: `Haraji Kharid — ${crop} (${c.man} Man) from ${farmer.name}`
+          });
+        }
+
+        showToast('Khedut Patti saved & Dashboard updated!');
+        openPattiReceipt(pattiId);
+      } catch (err) {
+        showToast(err.message || 'Patti save failed', 'error');
+      }
+    };
+
+    window.saveRojmel = async function(e) {
+      e.preventDefault();
+      const date = document.getElementById('rojmel-date').value;
+      const type = document.getElementById('rojmel-type').value;
+      const partyId = document.getElementById('rojmel-party').value;
+      const party = state.parties.find(p => p.id === partyId);
+      const mode = document.getElementById('rojmel-mode').value;
+      const amount = Number(document.getElementById('rojmel-amount').value) || 0;
+      const note = document.getElementById('rojmel-note').value.trim();
+
+      try {
+        await dbAdd('rojmel', {
+          date, type, partyId: party?.id || '', partyName: party?.name || '', mode, amount, note
+        });
+        if (party) {
+          await dbAdd('ledger', {
+            date,
+            partyId: party.id,
+            type,
+            amount,
+            note: `Rojmel (${mode}): ${note}`
+          });
+        }
+        document.getElementById('form-rojmel').reset();
+        initDateInputs();
+        showToast('Rojmel entry saved!');
+        navigate('dashboard');
+      } catch (err) {
+        showToast(err.message || 'Rojmel save failed', 'error');
+      }
+    };
+
+    window.saveBardan = async function(e) {
+      e.preventDefault();
+      const partyId = document.getElementById('bardan-party').value;
+      const party = state.parties.find(p => p.id === partyId);
+      if (!party) return showToast('Select a party first', 'error');
+      try {
+        await dbAdd('bardan', {
+          date: document.getElementById('bardan-date').value,
+          type: document.getElementById('bardan-type').value,
+          partyId: party.id,
+          partyName: party.name,
+          qty: Number(document.getElementById('bardan-qty').value) || 0,
+          note: document.getElementById('bardan-note').value.trim()
+        });
+        document.getElementById('form-bardan').reset();
+        initDateInputs();
+        showToast('Bardan entry saved!');
+      } catch (err) {
+        showToast(err.message || 'Bardan save failed', 'error');
+      }
+    };
+
+    window.saveStock = async function(e) {
+      e.preventDefault();
+      const date = document.getElementById('stock-date').value;
+      const type = document.getElementById('stock-type').value;
+      const crop = document.getElementById('stock-crop').value;
+      const bags = Number(document.getElementById('stock-bags').value) || 0;
+      const kg = Number(document.getElementById('stock-kg').value) || 0;
+      const amount = Number(document.getElementById('stock-amount').value) || 0;
+      const postRojmel = document.getElementById('stock-post-rojmel').checked;
+
+      try {
+        await dbAdd('stock', { date, type, crop, bags, kg, amount });
+        if (postRojmel && amount > 0) {
+          await dbAdd('rojmel', {
+            date,
+            type: type === 'in' ? 'udhar' : 'jama',
+            partyId: '',
+            partyName: 'Godown Stock',
+            mode: 'Cash',
+            amount,
+            note: `Godown Stock ${type === 'in' ? 'Kharid' : 'Vechan'} — ${crop} (${(kg / 20).toFixed(2)} Man)`
+          });
+        }
+        document.getElementById('form-stock').reset();
+        initDateInputs();
+        showToast('Godown Stock saved & Dashboard updated!');
+      } catch (err) {
+        showToast(err.message || 'Stock save failed', 'error');
+      }
+    };
+
+    window.saveParty = async function(e) {
+      e.preventDefault();
+      try {
+        await dbAdd('parties', {
+          name: document.getElementById('party-name').value.trim(),
+          type: document.getElementById('party-type').value,
+          phone: document.getElementById('party-phone').value.trim(),
+          village: document.getElementById('party-village').value.trim()
+        });
+        document.getElementById('form-party').reset();
+        showToast('New Party added!');
+        navigate('khatavahi');
+      } catch (err) {
+        showToast(err.message || 'Party save failed', 'error');
+      }
+    };
+
+    // =========================================================
+    // 10. PARTY STATEMENT & PATTI RECEIPT MODALS
+    // =========================================================
+    window.openPartyStatement = function(partyId) {
+      activeStatementPartyId = partyId;
+      renderPartyStatement(partyId);
+      openModal('modal-statement');
+    };
+
+    function renderPartyStatement(partyId) {
+      const p = state.parties.find(x => x.id === partyId);
+      if (!p) return;
+      document.getElementById('stmt-party-name').textContent = `${p.name} (${p.type === 'khedut' ? 'Khedut' : 'Vyapari'})`;
+      document.getElementById('stmt-party-meta').textContent = `${p.village || 'APMC Market Yard'} • ${p.phone || 'No Phone'}`;
+
+      const rows = shopRows('ledger')
+        .filter(l => l.partyId === partyId)
+        .sort((a, b) => (b.timestampMs || 0) - (a.timestampMs || 0));
+
+      let jama = 0, udhar = 0;
+      document.getElementById('stmt-tbody').innerHTML = rows.length === 0
+        ? `<tr><td colspan="5" class="px-3 py-6 text-center text-slate-400">No transactions yet.</td></tr>`
+        : rows.map(l => {
+          const amt = Number(l.amount) || 0;
+          if (l.type === 'jama') jama += amt; else udhar += amt;
+          return `<tr>
+            <td class="px-3 py-2 font-mono text-[11px] text-slate-500">${escapeHTML(l.entryDateTime || formatDateIN(l.date))}</td>
+            <td class="px-3 py-2">${escapeHTML(l.note || '')}</td>
+            <td class="px-3 py-2 text-right font-bold text-emerald-700 amt-sensitive">${l.type === 'jama' ? formatINR(amt) : '-'}</td>
+            <td class="px-3 py-2 text-right font-bold text-rose-700 amt-sensitive">${l.type === 'udhar' ? formatINR(amt) : '-'}</td>
+            <td class="px-3 py-2 text-right"><button type="button" onclick="confirmDeleteWithPin('ledger','${escapeHTML(l.id)}')" class="text-rose-600 font-bold">✕</button></td>
+          </tr>`;
+        }).join('');
+
+      const bal = jama - udhar;
+      document.getElementById('stmt-footer').textContent =
+        `Total Jama: ${formatINR(jama)} | Total Udhar: ${formatINR(udhar)} | Net: ${bal >= 0 ? 'Dena Baki ' + formatINR(bal) : 'Lena Baki ' + formatINR(Math.abs(bal))}`;
+    }
+
+    window.addDirectLedgerEntry = async function(e) {
+      e.preventDefault();
+      if (!activeStatementPartyId) return;
+      try {
+        await dbAdd('ledger', {
+          date: document.getElementById('ledger-date').value,
+          partyId: activeStatementPartyId,
+          type: document.getElementById('ledger-type').value,
+          amount: Number(document.getElementById('ledger-amount').value) || 0,
+          note: document.getElementById('ledger-note').value.trim()
+        });
+        document.getElementById('ledger-amount').value = '';
+        document.getElementById('ledger-note').value = '';
+        renderPartyStatement(activeStatementPartyId);
+        showToast('Ledger entry added!');
+      } catch (err) {
+        showToast(err.message || 'Ledger entry failed', 'error');
+      }
+    };
+
+    window.printPartyStatement = function() {
+      const shop = getShopById(activeShopId);
+      const title = document.getElementById('stmt-party-name').textContent;
+      const table = document.querySelector('#modal-statement table').outerHTML;
+      const foot = document.getElementById('stmt-footer').textContent;
+      const pa = document.getElementById('print-area');
+      pa.innerHTML = `<h2 style="font-size:20px;font-weight:900;">${escapeHTML(shop.name)}</h2>
+        <p style="font-size:12px;">${escapeHTML(shop.address || '')}</p><hr style="margin:10px 0;"/>
+        <h3 style="font-weight:800;margin-bottom:8px;">${escapeHTML(title)}</h3>${table}
+        <p style="margin-top:12px;font-weight:900;text-align:right;">${escapeHTML(foot)}</p>`;
+      window.print();
+    };
+
+    window.openPattiReceipt = function(pattiId) {
+      const p = state.pattis.find(x => x.id === pattiId);
+      if (!p) return;
+      currentPrintPatti = p;
+      const shop = getShopById(p.shopId);
+      document.getElementById('patti-receipt-body').innerHTML = `
+        <div class="p-4 rounded-2xl border border-slate-200 space-y-2">
+          <div class="text-center border-b border-slate-200 pb-2">
+            <div class="font-black text-base">${escapeHTML(shop.name)}</div>
+            <div class="text-[11px] text-slate-500">${escapeHTML(shop.address || 'APMC Market Yard')} ${shop.phone ? '• ' + escapeHTML(shop.phone) : ''}</div>
+          </div>
+          <div class="flex justify-between"><span>Khedut: <strong>${escapeHTML(p.farmerName)}</strong></span><span class="font-mono">${escapeHTML(p.entryDateTime || formatDateIN(p.date))}</span></div>
+          <div class="flex justify-between"><span>Fasal: <strong>${escapeHTML(p.crop)}</strong></span><span>Bori: <strong>${p.bags}</strong> • ${p.kg} Kg (${p.man} Man)</span></div>
+          <div class="flex justify-between"><span>Bhav (per 20 Kg):</span><strong>${formatINR(p.rate)}</strong></div>
+          <div class="flex justify-between border-t pt-1"><span>Gross Rakam:</span><strong>${formatINR(p.grossAmount)}</strong></div>
+          <div class="flex justify-between text-rose-700"><span>Total Kharch / Kapat:</span><span>- ${formatINR(p.totalDeductions)}</span></div>
+          <div class="flex justify-between border-t pt-2 text-base font-black text-emerald-800"><span>Net Payable:</span><span>${formatINR(p.netPayable)}</span></div>
+          <div class="text-[11px] text-slate-500">Status: ${p.paymentStatus === 'paid' ? 'Rokad / Cash Paid' : 'Baki / Udhar'}</div>
+        </div>`;
+      openModal('modal-patti-receipt');
+    };
+
+    window.printCurrentPatti = function() {
+      const pa = document.getElementById('print-area');
+      pa.innerHTML = document.getElementById('patti-receipt-body').innerHTML;
+      window.print();
+    };
+
+    // =========================================================
+    // 11. MASTER ADMIN RENDERERS & CONTROLS
+    // =========================================================
+    function renderAdminDashboard() {
+      let totalCash = 0, totalPatti = 0, totalVyapari = 0, totalKhedut = 0;
+      const cards = state.shops.map(s => {
+        const m = computeShopMetrics(s.id);
+        totalCash += m.netCash;
+        totalPatti += m.pattiTotal;
+        totalVyapari += m.vyapariBaki;
+        totalKhedut += m.khedutBaki;
+        return `<div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-3">
+          <div class="flex items-center justify-between">
+            <div><h4 class="font-black text-slate-900">${escapeHTML(s.name)}</h4><p class="text-[11px] text-slate-500">${escapeHTML(s.address || '')}</p></div>
+            <button type="button" onclick="switchActiveShop('${escapeHTML(s.id)}');navigate('dashboard')" class="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold">Open Shop →</button>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <div class="p-2.5 rounded-xl bg-emerald-50"><div class="text-slate-500 text-[10px]">Net Cash</div><div class="font-black text-emerald-900 amt-sensitive">${formatINR(m.netCash)}</div></div>
+            <div class="p-2.5 rounded-xl bg-amber-50"><div class="text-slate-500 text-[10px]">Total Patti</div><div class="font-black text-amber-900 amt-sensitive">${formatINR(m.pattiTotal)}</div></div>
+            <div class="p-2.5 rounded-xl bg-blue-50"><div class="text-slate-500 text-[10px]">Vyapari Baki</div><div class="font-black text-blue-900 amt-sensitive">${formatINR(m.vyapariBaki)}</div></div>
+            <div class="p-2.5 rounded-xl bg-orange-50"><div class="text-slate-500 text-[10px]">Khedut Baki</div><div class="font-black text-orange-900 amt-sensitive">${formatINR(m.khedutBaki)}</div></div>
+          </div>
+        </div>`;
+      }).join('');
+
+      document.getElementById('admin-combined-kpis').innerHTML = `
+        <div class="bg-slate-900 text-white rounded-2xl p-4"><div class="text-xs text-slate-300">All Shops Net Cash</div><div class="text-2xl font-black text-emerald-400 mt-1 amt-sensitive">${formatINR(totalCash)}</div></div>
+        <div class="bg-white rounded-2xl border border-slate-200 p-4"><div class="text-xs text-slate-500">All Shops Haraji Value</div><div class="text-2xl font-black text-amber-700 mt-1 amt-sensitive">${formatINR(totalPatti)}</div></div>
+        <div class="bg-white rounded-2xl border border-slate-200 p-4"><div class="text-xs text-slate-500">Total Vyapari Lena Baki</div><div class="text-2xl font-black text-blue-700 mt-1 amt-sensitive">${formatINR(totalVyapari)}</div></div>
+        <div class="bg-white rounded-2xl border border-slate-200 p-4"><div class="text-xs text-slate-500">Total Khedut Dena Baki</div><div class="text-2xl font-black text-orange-600 mt-1 amt-sensitive">${formatINR(totalKhedut)}</div></div>`;
+      document.getElementById('admin-shops-breakdown').innerHTML = cards;
+    }
+
+    function renderAdminUsersAndShops() {
+      const nonAdminUsers = state.users.filter(u => u.role !== 'admin');
+      document.getElementById('admin-users-tbody').innerHTML = nonAdminUsers.length === 0
+        ? `<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">Abhi koi shop user nahi bana hai. "➕ Add New User" click karein.</td></tr>`
+        : nonAdminUsers.map(u => {
+          const shop = state.shops.find(s => s.id === u.shopId);
+          return `<tr class="hover:bg-slate-50">
+            <td class="px-4 py-3 font-bold text-slate-900">${escapeHTML(u.fullName)}</td>
+            <td class="px-4 py-3 font-mono font-bold text-emerald-800">${escapeHTML(u.username)}</td>
+            <td class="px-4 py-3">${escapeHTML(shop ? shop.name : u.shopId)}</td>
+            <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${u.active ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}">${u.active ? 'Active' : 'Disabled'}</span></td>
+            <td class="px-4 py-3 text-right"><button type="button" onclick="openUserModal('${escapeHTML(u.id)}')" class="px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 font-bold">Edit / Password</button></td>
+          </tr>`;
+        }).join('');
+
+      document.getElementById('admin-shops-editor').innerHTML = state.shops.map(s => `
+        <form onsubmit="saveShopDetails(event,'${escapeHTML(s.id)}')" class="bg-white rounded-2xl border border-slate-200 p-4 space-y-2.5">
+          <div class="text-xs font-extrabold text-slate-500 uppercase">Shop Code: ${escapeHTML(s.id)}</div>
+          <input id="sh-name-${escapeHTML(s.id)}" value="${escapeHTML(s.name)}" required placeholder="Shop Name" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold" />
+          <div class="grid grid-cols-2 gap-2">
+            <input id="sh-owner-${escapeHTML(s.id)}" value="${escapeHTML(s.owner || '')}" placeholder="Owner Name" class="px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+            <input id="sh-phone-${escapeHTML(s.id)}" value="${escapeHTML(s.phone || '')}" placeholder="Phone" class="px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <input id="sh-addr-${escapeHTML(s.id)}" value="${escapeHTML(s.address || '')}" placeholder="APMC Address" class="px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+            <select id="sh-color-${escapeHTML(s.id)}" class="px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold">
+              ${['emerald', 'amber', 'blue', 'rose', 'indigo'].map(c => `<option value="${c}" ${s.color === c ? 'selected' : ''}>${c.toUpperCase()} Theme</option>`).join('')}
+            </select>
+          </div>
+          <button type="submit" class="w-full py-2 rounded-xl bg-slate-900 text-white text-xs font-bold">Save Shop Info</button>
+        </form>`).join('');
+
+      const uidInp = document.getElementById('adm-self-uid');
+      if (uidInp && session) uidInp.value = session.username;
+    }
+
+    window.saveShopDetails = async function(e, shopId) {
+      e.preventDefault();
+      const updated = {
+        name: document.getElementById(`sh-name-${shopId}`).value.trim(),
+        owner: document.getElementById(`sh-owner-${shopId}`).value.trim(),
+        phone: document.getElementById(`sh-phone-${shopId}`).value.trim(),
+        address: document.getElementById(`sh-addr-${shopId}`).value.trim(),
+        color: document.getElementById(`sh-color-${shopId}`).value
+      };
+      try {
+        await apiRequest(`/api/admin/shops/${encodeURIComponent(shopId)}`, { method: 'PUT', body: updated });
+        await fetchBootstrapData();
+        renderAll();
+        showToast('Pedhi details updated in MongoDB!');
+      } catch (err) {
+        showToast(err.message || 'Shop update failed', 'error');
+      }
+    };
+
+    window.openUserModal = function(userId) {
+      const u = userId ? state.users.find(x => x.id === userId) : null;
+      document.getElementById('um-edit-id').value = u ? u.id : '';
+      document.getElementById('um-title').textContent = u ? `Edit User: ${u.username}` : '➕ Add New Shop User';
+      document.getElementById('um-fullname').value = u ? u.fullName : '';
+      document.getElementById('um-username').value = u ? u.username : '';
+      document.getElementById('um-password').value = '';
+      document.getElementById('um-password').required = !u;
+      document.getElementById('um-pwd-hint').textContent = u ? '(blank = unchanged)' : '(8+ chars, A-z + 0-9)';
+      document.getElementById('um-role').value = u ? u.role : 'shop_user';
+      document.getElementById('um-active').checked = u ? u.active !== false : true;
+
+      const sel = document.getElementById('um-shop-select');
+      sel.innerHTML = state.shops.map(s => `<option value="${escapeHTML(s.id)}">${escapeHTML(s.name)}</option>`).join('') +
+        `<option value="__NEW_SHOP__">➕ Create Brand-New Pedhi / Shop</option>`;
+      if (u && u.shopId) sel.value = u.shopId;
+      toggleNewShopFields();
+      openModal('modal-user');
+    };
+
+    window.toggleNewShopFields = function() {
+      const isNew = document.getElementById('um-shop-select').value === '__NEW_SHOP__';
+      document.getElementById('um-new-shop-fields').classList.toggle('hidden', !isNew);
+    };
+
+    window.saveUserFromModal = async function(e) {
+      e.preventDefault();
+      const editId = document.getElementById('um-edit-id').value;
+      const fullName = document.getElementById('um-fullname').value.trim();
+      const username = document.getElementById('um-username').value.trim();
+      const password = document.getElementById('um-password').value;
+      const role = document.getElementById('um-role').value;
+      const shopId = document.getElementById('um-shop-select').value;
+      const active = document.getElementById('um-active').checked;
+
+      const body = { fullName, username, password, role, shopId, active };
+      if (shopId === '__NEW_SHOP__') {
+        body.newShop = {
+          name: document.getElementById('um-new-shop-name').value.trim(),
+          color: document.getElementById('um-new-shop-color').value,
+          owner: document.getElementById('um-new-shop-owner').value.trim(),
+          phone: document.getElementById('um-new-shop-phone').value.trim(),
+          address: document.getElementById('um-new-shop-address').value.trim()
+        };
+      }
+
+      try {
+        if (editId) {
+          await apiRequest(`/api/admin/users/${encodeURIComponent(editId)}`, { method: 'PUT', body });
+          showToast('User updated! Purani ID/Password ab band ho chuki hai.');
+        } else {
+          await apiRequest('/api/admin/users', { method: 'POST', body });
+          showToast(`New user "${username}" created!`);
+        }
+        await fetchBootstrapData();
+        closeAllModals();
+        renderAll();
+      } catch (err) {
+        showToast(err.message || 'User save failed', 'error');
+      }
+    };
+
+    window.updateAdminCredentials = async function(e) {
+      e.preventDefault();
+      const username = document.getElementById('adm-self-uid').value.trim();
+      const password = document.getElementById('adm-self-pass').value;
+      const pin = document.getElementById('adm-self-pin').value.trim();
+
+      try {
+        const res = await apiRequest('/api/admin/credentials', {
+          method: 'PUT',
+          body: { username, password: password || undefined, pin: pin || undefined }
+        });
+        if (res.token) authToken = res.token;
+        if (res.user) session = res.user;
+        document.getElementById('adm-self-pass').value = '';
+        document.getElementById('adm-self-pin').value = '';
+        await fetchBootstrapData();
+        renderAll();
+        showToast('Admin security credentials updated!');
+      } catch (err) {
+        showToast(err.message || 'Credential update failed', 'error');
+      }
+    };
+
+    function renderAdminFeatures() {
+      const f = state.config.features || defaultConfig.features;
+      const d = state.config.defaults || defaultConfig.defaults;
+      document.getElementById('cfg-bardan').checked = !!f.bardan;
+      document.getElementById('cfg-stock').checked = !!f.stock;
+      document.getElementById('cfg-cess').checked = !!f.apmcCess;
+      document.getElementById('cfg-gst').checked = !!f.gst;
+      document.getElementById('cfg-dalali').value = d.dalaliPercent ?? 2;
+      document.getElementById('cfg-hamali').value = d.hamaliRate ?? 10;
+      document.getElementById('cfg-tolai').value = d.tolai ?? 0;
+      document.getElementById('cfg-cess-pct').value = d.apmcCessPercent ?? 0.5;
+      document.getElementById('cfg-inactivity').value = state.config.inactivityMinutes || 15;
+
+      const chips = document.getElementById('crops-chip-list');
+      if (chips) {
+        chips.innerHTML = (state.config.crops || []).map((c, idx) => `
+          <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-xs font-bold text-slate-800">
+            ${escapeHTML(c)}
+            <button type="button" onclick="removeCropItem(${idx})" class="text-rose-500 hover:text-rose-700">✕</button>
+          </span>`).join('');
+      }
+    }
+
+    window.saveFeatureSettings = async function(e) {
+      e.preventDefault();
+      state.config.features = {
+        bardan: document.getElementById('cfg-bardan').checked,
+        stock: document.getElementById('cfg-stock').checked,
+        apmcCess: document.getElementById('cfg-cess').checked,
+        gst: document.getElementById('cfg-gst').checked
+      };
+      state.config.defaults = {
+        dalaliPercent: Number(document.getElementById('cfg-dalali').value) || 0,
+        hamaliRate: Number(document.getElementById('cfg-hamali').value) || 0,
+        tolai: Number(document.getElementById('cfg-tolai').value) || 0,
+        apmcCessPercent: Number(document.getElementById('cfg-cess-pct').value) || 0
+      };
+      state.config.inactivityMinutes = Math.max(1, Number(document.getElementById('cfg-inactivity').value) || 15);
+      try {
+        await saveConfigToCloud();
+        applyDefaultRatesToPattiForm();
+        showToast('Feature settings saved!');
+      } catch (err) {
+        showToast(err.message || 'Settings save failed', 'error');
+      }
+    };
+
+    window.addCropItem = async function() {
+      const inp = document.getElementById('new-crop-input');
+      const val = inp.value.trim();
+      if (!val) return;
+      if (!state.config.crops.includes(val)) {
+        state.config.crops.push(val);
+        await saveConfigToCloud();
+        inp.value = '';
+        showToast(`Crop "${val}" added!`);
+      }
+    };
+
+    window.removeCropItem = async function(idx) {
+      state.config.crops.splice(idx, 1);
+      await saveConfigToCloud();
+      showToast('Crop removed', 'info');
+    };
+
+    function renderAdminAudit() {
+      const tb = document.getElementById('audit-log-tbody');
+      if (!tb) return;
+      tb.innerHTML = state.auditLogs.length === 0
+        ? `<tr><td colspan="5" class="px-4 py-6 text-center text-slate-400">No audit logs yet.</td></tr>`
+        : state.auditLogs.map(a => `
+          <tr class="hover:bg-slate-50">
+            <td class="px-4 py-2 font-mono text-[11px] text-slate-500">${escapeHTML(a.timestamp)}</td>
+            <td class="px-4 py-2 font-bold">${escapeHTML(a.userId)}</td>
+            <td class="px-4 py-2 text-slate-600">${escapeHTML(a.shopName || '')}</td>
+            <td class="px-4 py-2 font-extrabold text-slate-800">${escapeHTML(a.action)}</td>
+            <td class="px-4 py-2 text-slate-600">${escapeHTML(a.details || '')}</td>
+          </tr>`).join('');
+    }
+
+    // =========================================================
+    // 12. BACKUP, CSV EXPORT, MODALS & PIN-PROTECTED DELETE
+    // =========================================================
+    function downloadCSV(filename, rows) {
+      if (!rows.length) return showToast('Export karne ke liye koi data nahi hai.', 'info');
+      const keys = Object.keys(rows[0]);
+      const csv = [
+        keys.join(','),
+        ...rows.map(r => keys.map(k => `"${String(r[k] ?? '').replace(/"/g, '""')}"`).join(','))
+      ].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    window.exportCSV = function(col) {
+      const rows = shopRows(col);
+      downloadCSV(`${activeShopId}_${col}_${getNowParts().dateISO}.csv`, rows);
+    };
+
+    window.downloadFullJSONBackup = async function() {
+      try {
+        const backup = await apiRequest('/api/admin/backup');
+        const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ganj_bazar_mongodb_backup_${getNowParts().dateISO}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Complete MongoDB JSON backup downloaded!');
+      } catch (err) {
+        showToast(err.message || 'Backup download failed', 'error');
+      }
+    };
+
+    window.restoreFullJSONBackup = function(e) {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async (ev) => {
+        try {
+          const data = JSON.parse(ev.target.result);
+          await apiRequest('/api/admin/restore', { method: 'POST', body: data });
+          await fetchBootstrapData();
+          renderAll();
+          showToast('JSON backup restored to MongoDB successfully!');
+        } catch (err) {
+          console.error(err);
+          showToast(err.message || 'Invalid JSON backup file!', 'error');
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    };
+
+    function openModal(modalId) {
+      document.getElementById('modal-backdrop').classList.remove('hidden');
+      document.querySelectorAll('.modal-box').forEach(m => m.classList.toggle('hidden', m.id !== modalId));
+    }
+
+    window.closeAllModals = function() {
+      document.getElementById('modal-backdrop').classList.add('hidden');
+      document.querySelectorAll('.modal-box').forEach(m => m.classList.add('hidden'));
+    };
+
+    window.confirmDeleteWithPin = function(colName, id) {
+      pendingDeleteTarget = { colName, id };
+      document.getElementById('delete-pin-input').value = '';
+      document.getElementById('delete-pin-error').classList.add('hidden');
+      openModal('modal-pin-delete');
+      setTimeout(() => document.getElementById('delete-pin-input')?.focus(), 80);
+    };
+
+    window.executePinProtectedDelete = async function(e) {
+      e.preventDefault();
+      if (!pendingDeleteTarget) return;
+      const enteredPin = document.getElementById('delete-pin-input').value.trim();
+      const errEl = document.getElementById('delete-pin-error');
+      errEl.classList.add('hidden');
+
+      try {
+        const { colName, id } = pendingDeleteTarget;
+        await dbDelete(colName, id, enteredPin);
+        pendingDeleteTarget = null;
+        closeAllModals();
+        if (colName === 'ledger' && activeStatementPartyId) {
+          openPartyStatement(activeStatementPartyId);
+        }
+        renderAll();
+        showToast('Entry deleted safely.');
+      } catch (err) {
+        errEl.textContent = err.message || 'Galat Admin PIN!';
+        errEl.classList.remove('hidden');
+      }
+    };
+
+    function initDateInputs() {
+      const today = getNowParts().dateISO;
+      ['patti-date', 'rojmel-date', 'bardan-date', 'stock-date', 'ledger-date'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = today;
+      });
+    }
+
+    // =========================================================
+    // 13. BOOTSTRAP ON LOAD
+    // =========================================================
+    window.addEventListener('DOMContentLoaded', () => {
+      updateOnlineStatus();
+      updateSilentBlockOverlay();
+      startLiveClock();
+      refreshCaptcha();
+      initDateInputs();
+      initSidebarProximityEffect();
+      checkBackendStatus();
+    });
+  </script>
+</body>
+</html>
